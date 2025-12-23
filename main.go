@@ -78,8 +78,8 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 				count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
 				valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
 
-				slog.Info("IFD Entry",
-					"tag", tag,
+				slog.Info("IFD01 Entry",
+					"tag", fmt.Sprintf("%#x", tag),
 					"type", dataType,
 					"count", count,
 					"valueOffset", valueOffset)
@@ -144,6 +144,51 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 	}
 
 	return nil, errors.New("unable to find EXIF Block")
+}
+
+func extractExifSubIFD(data []byte, exifIfdOffset int, tiffStart int, endian binary.ByteOrder, metadata *PhotoExifEvidence) {
+	entryCount := endian.Uint16(data[exifIfdOffset : exifIfdOffset+2])
+	for j := 0; j < int(entryCount); j++ {
+		entryOffset := exifIfdOffset + 2 + (j * 12)
+
+		tag := endian.Uint16(data[entryOffset : entryOffset+2])
+		dataType := endian.Uint16(data[entryOffset+2 : entryOffset+4])
+		count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
+		valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+
+		slog.Info("ExifIFD Entry",
+			"tag", fmt.Sprintf("%#x", tag),
+			"type", dataType,
+			"count", count,
+			"valueOffset", valueOffset)
+
+		switch tag {
+		case 0x0002:
+			metadata.GPSLatitude = getEXIFRational(data, tiffStart+int(valueOffset), endian)
+		case 0x0004:
+			metadata.GPSLongitude = getEXIFRational(data, tiffStart+int(valueOffset), endian)
+		case 0x9003:
+			offset := tiffStart + int(valueOffset)
+			dateStr := getEXIFString(data, entryOffset, offset, int(count))
+			captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
+			if err != nil {
+				slog.Warn("Found capture timestamp, but it is an invalid format!", "captureDate", dateStr, "error", err)
+				continue
+			}
+			metadata.DateCaptured = captured
+		case 0xa002:
+			metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
+		case 0xa003:
+			metadata.PixelYDimension = float64(getEXIFuInt16(data, entryOffset, endian))
+		case 0x9209:
+			flashRaw := getEXIFuInt16(data, entryOffset, endian)
+			if flashRaw&0x01 != 0 {
+				metadata.Flash = "Flash Fired"
+			} else {
+				metadata.Flash = "Flash did not fire"
+			}
+		}
+	}
 }
 
 func getEXIFString(data []byte, entryOffset, offset, count int) string {
