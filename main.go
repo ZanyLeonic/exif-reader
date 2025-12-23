@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -94,26 +95,7 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 				case 0x0131:
 					offset := tiffStart + int(valueOffset)
 					metadata.Software = getEXIFString(data, entryOffset, offset, int(count))
-				case 0x9003:
-					offset := tiffStart + int(valueOffset)
-					dateStr := getEXIFString(data, entryOffset, offset, int(count))
-					captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
-					if err != nil {
-						slog.Warn("Found capture timestamp, but it is an invalid format!", "captureDate", dateStr, "error", err)
-						continue
-					}
-					metadata.DateCaptured = captured
-				case 0xa002:
-					metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
-				case 0xa003:
-					metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
-				case 0x9209:
-					flashRaw := getEXIFuInt16(data, entryOffset, endian)
-					if flashRaw == 1 {
-						metadata.Flash = "Flash Fired"
-					} else {
-						metadata.Flash = "Flash did not fire"
-					}
+
 				case 0x0112:
 					orientationRaw := getEXIFuInt16(data, entryOffset, endian)
 					switch orientationRaw {
@@ -136,6 +118,14 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 					default:
 						metadata.Orientation = "Unknown"
 					}
+				case 0x8769:
+					exifSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+					exifIfdOffset := tiffStart + int(exifSubIfdPointer)
+					extractExifSubIFD(data, exifIfdOffset, tiffStart, endian, &metadata)
+				case 0x8825:
+					gpsSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+					gpsIfdOffset := tiffStart + int(gpsSubIfdPointer)
+					extractGPSIFD(data, gpsIfdOffset, tiffStart, endian, &metadata)
 				}
 			}
 
@@ -191,6 +181,49 @@ func extractExifSubIFD(data []byte, exifIfdOffset int, tiffStart int, endian bin
 	}
 }
 
+func extractGPSIFD(data []byte, exifIfdOffset int, tiffStart int, endian binary.ByteOrder, metadata *PhotoExifEvidence) {
+	entryCount := endian.Uint16(data[exifIfdOffset : exifIfdOffset+2])
+
+	var latRef string
+	var longRef string
+
+	for j := 0; j < int(entryCount); j++ {
+		entryOffset := exifIfdOffset + 2 + (j * 12)
+
+		tag := endian.Uint16(data[entryOffset : entryOffset+2])
+		dataType := endian.Uint16(data[entryOffset+2 : entryOffset+4])
+		count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
+		valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+
+		slog.Info("GPS IFD Entry",
+			"tag", fmt.Sprintf("%#x", tag),
+			"type", dataType,
+			"count", count,
+			"valueOffset", valueOffset)
+
+		switch tag {
+		case 0x1:
+			offset := tiffStart + int(valueOffset)
+			latRef = getEXIFString(data, entryOffset, offset, int(count))
+		case 0x2:
+			metadata.GPSLatitude = getGPSCoord(data, tiffStart+int(valueOffset), endian)
+		case 0x3:
+			offset := tiffStart + int(valueOffset)
+			longRef = getEXIFString(data, entryOffset, offset, int(count))
+		case 0x4:
+			metadata.GPSLongitude = getGPSCoord(data, tiffStart+int(valueOffset), endian)
+		}
+	}
+
+	if latRef == "S" {
+		metadata.GPSLatitude *= -1
+	}
+
+	if longRef == "W" {
+		metadata.GPSLongitude *= -1
+	}
+}
+
 func getEXIFString(data []byte, entryOffset, offset, count int) string {
 	if count <= 4 {
 		return strings.TrimRight(string(data[entryOffset+8:entryOffset+8+count]), "\x00")
@@ -211,4 +244,12 @@ func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
 
 func getEXIFuInt16(data []byte, offset int, endian binary.ByteOrder) uint16 {
 	return endian.Uint16(data[offset+8 : offset+10])
+}
+
+func getGPSCoord(data []byte, offset int, endian binary.ByteOrder) float64 {
+	degrees := getEXIFRational(data, offset, endian)
+	minutes := getEXIFRational(data, offset+8, endian)
+	seconds := getEXIFRational(data, offset+16, endian)
+
+	return degrees + (minutes / 60.0) + (seconds / 3600.0)
 }
