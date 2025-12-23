@@ -13,6 +13,7 @@ type PhotoExifEvidence struct {
 	DateCaptured    time.Time `json:"dateCaptured"`
 	GPSLatitude     float64   `json:"gpsLatitude"`
 	GPSLongitude    float64   `json:"gpsLongitude"`
+	Make            string    `json:"make"`
 	Model           string    `json:"model"`
 	PixelXDimension float64   `json:"pixelXDimension"`
 	PixelYDimension float64   `json:"pixelYDimension"`
@@ -67,6 +68,8 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 			entryCount := endian.Uint16(data[firstIfdIndex : firstIfdIndex+2])
 			slog.Info("IFD entry count", "count", entryCount)
 
+			metadata := PhotoExifEvidence{}
+
 			for j := 0; j < int(entryCount); j++ {
 				entryOffset := firstIfdIndex + 2 + (j * 12)
 
@@ -81,32 +84,86 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 					"count", count,
 					"valueOffset", valueOffset)
 
-				if tag == 0x010F {
-					cameraMake := ""
-					if count <= 4 {
-						cameraMake = string(data[entryOffset+8 : entryOffset+8+int(count)])
-					} else {
-						offset := tiffStart + int(valueOffset)
-						cameraMake = string(data[offset : offset+int(count)])
+				switch tag {
+				case 0x010F:
+					offset := tiffStart + int(valueOffset)
+					metadata.Make = getEXIFString(data, entryOffset, offset, int(count))
+				case 0x0110:
+					offset := tiffStart + int(valueOffset)
+					metadata.Model = getEXIFString(data, entryOffset, offset, int(count))
+				case 0x0131:
+					offset := tiffStart + int(valueOffset)
+					metadata.Software = getEXIFString(data, entryOffset, offset, int(count))
+				case 0x9003:
+					offset := tiffStart + int(valueOffset)
+					dateStr := getEXIFString(data, entryOffset, offset, int(count))
+					captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
+					if err != nil {
+						slog.Warn("Found capture timestamp, but it is an invalid format!", "captureDate", dateStr, "error", err)
+						continue
 					}
-
-					slog.Info("Found Make tag", "make", strings.TrimRight(cameraMake, "\x00"))
-				} else if tag == 0x0110 {
-					cameraModel := ""
-					if count <= 4 {
-						cameraModel = string(data[entryOffset+8 : entryOffset+8+int(count)])
+					metadata.DateCaptured = captured
+				case 0xa002:
+					metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
+				case 0xa003:
+					metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
+				case 0x9209:
+					flashRaw := getEXIFuInt16(data, entryOffset, endian)
+					if flashRaw == 1 {
+						metadata.Flash = "Flash Fired"
 					} else {
-						offset := tiffStart + int(valueOffset)
-						cameraModel = string(data[offset : offset+int(count)])
+						metadata.Flash = "Flash did not fire"
 					}
-
-					slog.Info("Found Model tag", "model", strings.TrimRight(cameraModel, "\x00"))
+				case 0x0112:
+					orientationRaw := getEXIFuInt16(data, entryOffset, endian)
+					switch orientationRaw {
+					case 1:
+						metadata.Orientation = "Horizontal"
+					case 2:
+						metadata.Orientation = "Mirror horizontal"
+					case 3:
+						metadata.Orientation = "Rotate 180"
+					case 4:
+						metadata.Orientation = "Mirror vertical"
+					case 5:
+						metadata.Orientation = "Mirror horizontal and rotate 270 CW"
+					case 6:
+						metadata.Orientation = "Rotate 90 CW"
+					case 7:
+						metadata.Orientation = "Mirror horizontal and rotate 90 CW"
+					case 8:
+						metadata.Orientation = "Rotate 270 CW"
+					default:
+						metadata.Orientation = "Unknown"
+					}
 				}
 			}
 
-			return &PhotoExifEvidence{}, nil
+			return &metadata, nil
 		}
 	}
 
 	return nil, errors.New("unable to find EXIF Block")
+}
+
+func getEXIFString(data []byte, entryOffset, offset, count int) string {
+	if count <= 4 {
+		return strings.TrimRight(string(data[entryOffset+8:entryOffset+8+count]), "\x00")
+	}
+	return strings.TrimRight(string(data[offset:offset+count]), "\x00")
+}
+
+func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
+	numerator := endian.Uint32(data[offset : offset+4])
+	denominator := endian.Uint32(data[offset+4 : offset+8])
+
+	if denominator == 0 {
+		return 0
+	}
+
+	return float64(numerator) / float64(denominator)
+}
+
+func getEXIFuInt16(data []byte, offset int, endian binary.ByteOrder) uint16 {
+	return endian.Uint16(data[offset+8 : offset+10])
 }
