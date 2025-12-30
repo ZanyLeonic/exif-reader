@@ -23,6 +23,34 @@ type PhotoExifEvidence struct {
 	Flash           string    `json:"flash"`
 }
 
+type EXIFTag uint16
+
+// APP1 IFD Tags
+const (
+	Make        EXIFTag = 0x010f
+	Model       EXIFTag = 0x0110
+	Orientation EXIFTag = 0x0112
+	Software    EXIFTag = 0x0131
+	EXIFSubIFD  EXIFTag = 0x8769
+	GPSSubIFD   EXIFTag = 0x8825
+)
+
+// EXIF Sub-IFD Tags
+const (
+	DateCaptured    EXIFTag = 0x9003
+	PixelXDimension EXIFTag = 0xa002
+	PixelYDimension EXIFTag = 0xa003
+	FlashFired      EXIFTag = 0x9209
+)
+
+// GPS Sub-IFD Tags
+const (
+	LatitudeDir  EXIFTag = 0x1
+	Latitude     EXIFTag = 0x2
+	LongitudeDir EXIFTag = 0x3
+	Longitude    EXIFTag = 0x4
+)
+
 func main() {
 	data, err := os.ReadFile("example.jpg")
 	if err != nil {
@@ -74,7 +102,7 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 			for j := 0; j < int(entryCount); j++ {
 				entryOffset := firstIfdIndex + 2 + (j * 12)
 
-				tag := endian.Uint16(data[entryOffset : entryOffset+2])
+				tag := EXIFTag(endian.Uint16(data[entryOffset : entryOffset+2]))
 				dataType := endian.Uint16(data[entryOffset+2 : entryOffset+4])
 				count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
 				valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
@@ -86,43 +114,23 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 					"valueOffset", valueOffset)
 
 				switch tag {
-				case 0x010F:
+				case Make:
 					offset := tiffStart + int(valueOffset)
 					metadata.Make = getEXIFString(data, entryOffset, offset, int(count))
-				case 0x0110:
+				case Model:
 					offset := tiffStart + int(valueOffset)
 					metadata.Model = getEXIFString(data, entryOffset, offset, int(count))
-				case 0x0131:
+				case Software:
 					offset := tiffStart + int(valueOffset)
 					metadata.Software = getEXIFString(data, entryOffset, offset, int(count))
-
-				case 0x0112:
+				case Orientation:
 					orientationRaw := getEXIFuInt16(data, entryOffset, endian)
-					switch orientationRaw {
-					case 1:
-						metadata.Orientation = "Horizontal"
-					case 2:
-						metadata.Orientation = "Mirror horizontal"
-					case 3:
-						metadata.Orientation = "Rotate 180"
-					case 4:
-						metadata.Orientation = "Mirror vertical"
-					case 5:
-						metadata.Orientation = "Mirror horizontal and rotate 270 CW"
-					case 6:
-						metadata.Orientation = "Rotate 90 CW"
-					case 7:
-						metadata.Orientation = "Mirror horizontal and rotate 90 CW"
-					case 8:
-						metadata.Orientation = "Rotate 270 CW"
-					default:
-						metadata.Orientation = "Unknown"
-					}
-				case 0x8769:
+					metadata.Orientation = parseOrientationValue(orientationRaw)
+				case EXIFSubIFD:
 					exifSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
 					exifIfdOffset := tiffStart + int(exifSubIfdPointer)
 					extractExifSubIFD(data, exifIfdOffset, tiffStart, endian, &metadata)
-				case 0x8825:
+				case GPSSubIFD:
 					gpsSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
 					gpsIfdOffset := tiffStart + int(gpsSubIfdPointer)
 					extractGPSIFD(data, gpsIfdOffset, tiffStart, endian, &metadata)
@@ -136,12 +144,96 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 	return nil, errors.New("unable to find EXIF Block")
 }
 
+func parseOrientationValue(raw uint16) string {
+	switch raw {
+	case 1:
+		return "Horizontal"
+	case 2:
+		return "Mirror horizontal"
+	case 3:
+		return "Rotate 180"
+	case 4:
+		return "Mirror vertical"
+	case 5:
+		return "Mirror horizontal and rotate 270 CW"
+	case 6:
+		return "Rotate 90 CW"
+	case 7:
+		return "Mirror horizontal and rotate 90 CW"
+	case 8:
+		return "Rotate 270 CW"
+	default:
+		return "Unknown"
+	}
+}
+
+func parseFlashValue(raw uint16) string {
+	switch raw {
+	case 0x0:
+		return "No Flash"
+	case 0x1:
+		return "Fired"
+	case 0x5:
+		return "Fired, Return no detected"
+	case 0x7:
+		return "Fired, Return detected"
+	case 0x8:
+		return "On, Did not fire"
+	case 0x9:
+		return "On, Fired"
+	case 0xd:
+		return "On, Return not detected"
+	case 0xf:
+		return "On, Return detected"
+	case 0x10:
+		return "Off, Did not fire"
+	case 0x14:
+		return "Off, Did not fire, Return not detected"
+	case 0x18:
+		return "Auto, Did not fire"
+	case 0x19:
+		return "Auto, Fired"
+	case 0x1d:
+		return "Auto, Fired, Return not detected"
+	case 0x1f:
+		return "Auto, Fired, Return detected"
+	case 0x20:
+		return "No flash function"
+	case 0x30:
+		return "Off, No flash function"
+	case 0x41:
+		return "Fired, Red-eye reduction"
+	case 0x45:
+		return "Fired, Red-eye reduction, Return not detected"
+	case 0x47:
+		return "Fired, Red-eye reduction, Return detected"
+	case 0x49:
+		return "On, Red-eye reduction"
+	case 0x4d:
+		return "On, Red-eye reduction, Return not detected"
+	case 0x4f:
+		return "On, Red-eye reduction, Return detected"
+	case 0x50:
+		return "Off, Red-eye reduction"
+	case 0x58:
+		return "Auto, Did not fire, Red-eye reduction"
+	case 0x59:
+		return "Auto, Fired, Red-eye reduction"
+	case 0x5d:
+		return "Auto, Fired, Red-eye reduction, Return not detected"
+	case 0x5f:
+		return "Auto, Fired, Red-eye reduction, Return detected"
+	default:
+		return "Unknown"
+	}
+}
+
 func extractExifSubIFD(data []byte, exifIfdOffset int, tiffStart int, endian binary.ByteOrder, metadata *PhotoExifEvidence) {
 	entryCount := endian.Uint16(data[exifIfdOffset : exifIfdOffset+2])
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := exifIfdOffset + 2 + (j * 12)
 
-		tag := endian.Uint16(data[entryOffset : entryOffset+2])
+		tag := EXIFTag(endian.Uint16(data[entryOffset : entryOffset+2]))
 		dataType := endian.Uint16(data[entryOffset+2 : entryOffset+4])
 		count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
 		valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
@@ -153,11 +245,7 @@ func extractExifSubIFD(data []byte, exifIfdOffset int, tiffStart int, endian bin
 			"valueOffset", valueOffset)
 
 		switch tag {
-		case 0x0002:
-			metadata.GPSLatitude = getEXIFRational(data, tiffStart+int(valueOffset), endian)
-		case 0x0004:
-			metadata.GPSLongitude = getEXIFRational(data, tiffStart+int(valueOffset), endian)
-		case 0x9003:
+		case DateCaptured:
 			offset := tiffStart + int(valueOffset)
 			dateStr := getEXIFString(data, entryOffset, offset, int(count))
 			captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
@@ -166,17 +254,12 @@ func extractExifSubIFD(data []byte, exifIfdOffset int, tiffStart int, endian bin
 				continue
 			}
 			metadata.DateCaptured = captured
-		case 0xa002:
+		case PixelXDimension:
 			metadata.PixelXDimension = float64(getEXIFuInt16(data, entryOffset, endian))
-		case 0xa003:
+		case PixelYDimension:
 			metadata.PixelYDimension = float64(getEXIFuInt16(data, entryOffset, endian))
-		case 0x9209:
-			flashRaw := getEXIFuInt16(data, entryOffset, endian)
-			if flashRaw&0x01 != 0 {
-				metadata.Flash = "Flash Fired"
-			} else {
-				metadata.Flash = "Flash did not fire"
-			}
+		case FlashFired:
+			metadata.Flash = parseFlashValue(getEXIFuInt16(data, entryOffset, endian))
 		}
 	}
 }
@@ -190,7 +273,7 @@ func extractGPSIFD(data []byte, exifIfdOffset int, tiffStart int, endian binary.
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := exifIfdOffset + 2 + (j * 12)
 
-		tag := endian.Uint16(data[entryOffset : entryOffset+2])
+		tag := EXIFTag(endian.Uint16(data[entryOffset : entryOffset+2]))
 		dataType := endian.Uint16(data[entryOffset+2 : entryOffset+4])
 		count := endian.Uint32(data[entryOffset+4 : entryOffset+8])
 		valueOffset := endian.Uint32(data[entryOffset+8 : entryOffset+12])
@@ -202,15 +285,15 @@ func extractGPSIFD(data []byte, exifIfdOffset int, tiffStart int, endian binary.
 			"valueOffset", valueOffset)
 
 		switch tag {
-		case 0x1:
+		case LatitudeDir:
 			offset := tiffStart + int(valueOffset)
 			latRef = getEXIFString(data, entryOffset, offset, int(count))
-		case 0x2:
+		case Latitude:
 			metadata.GPSLatitude = getGPSCoord(data, tiffStart+int(valueOffset), endian)
-		case 0x3:
+		case LongitudeDir:
 			offset := tiffStart + int(valueOffset)
 			longRef = getEXIFString(data, entryOffset, offset, int(count))
-		case 0x4:
+		case Longitude:
 			metadata.GPSLongitude = getGPSCoord(data, tiffStart+int(valueOffset), endian)
 		}
 	}
