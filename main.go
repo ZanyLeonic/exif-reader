@@ -6,8 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
+
+func getEXIFString(data []byte, entryOffset, offset, count int) string {
+	if count <= 4 {
+		return strings.TrimRight(string(data[entryOffset+8:entryOffset+8+count]), "\x00")
+	}
+	return strings.TrimRight(string(data[offset:offset+count]), "\x00")
+}
 
 func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
 	if offset < 0 || offset >= len(data) {
@@ -22,6 +30,13 @@ func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
 	}
 
 	return float64(numerator) / float64(denominator)
+}
+
+func getEXIFuInt32(data []byte, offset int, endian binary.ByteOrder) uint32 {
+	if offset < 0 || offset >= len(data) {
+		return 0
+	}
+	return endian.Uint32(data[offset+8 : offset+12])
 }
 
 func getEXIFuInt16(data []byte, offset int, endian binary.ByteOrder) uint16 {
@@ -111,22 +126,50 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 			"valueOffset", entry.ValueOffset)
 
 		switch entry.Tag {
+		case ProcessingSoftware:
+			metadata.Processing.ProcessingSoftware = helper.GetString(entry, entryOffset)
+		case ImageWidth:
+			metadata.Image.Width = int(helper.GetUint32(entryOffset))
+		case ImageHeight:
+			metadata.Image.Width = int(helper.GetUint32(entryOffset))
+		case ImageDescription:
+			metadata.Authorship.ImageDescription = helper.GetString(entry, entryOffset)
 		case Make:
 			metadata.Device.Make = helper.GetString(entry, entryOffset)
 		case Model:
 			metadata.Device.Model = helper.GetString(entry, entryOffset)
-		case Software:
-			metadata.Processing.Software = helper.GetString(entry, entryOffset)
 		case Orientation:
 			metadata.Image.Orientation = parseOrientationValue(helper.GetUint16(entryOffset))
+		case Software:
+			metadata.Processing.Software = helper.GetString(entry, entryOffset)
+		case ModifyDate:
+			dateStr := helper.GetString(entry, entryOffset)
+			parsed, err := time.Parse("2006:01:02 15:04:05", dateStr)
+			if err != nil {
+				slog.Warn("Found ModifyDate in IFD01, however, cannot parse", "error", err)
+				continue
+			}
+			metadata.Temporal.ModifyDate = parsed
+		case Artist:
+			metadata.Authorship.Artist = helper.GetString(entry, entryOffset)
 		case EXIFSubIFD:
-			exifSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+			exifSubIfdPointer := helper.GetUint32(entryOffset)
 			exifIfdOffset := tiffStart + int(exifSubIfdPointer)
 			extractExifSubIFD(exifIfdOffset, &metadata, &helper)
 		case GPSSubIFD:
-			gpsSubIfdPointer := endian.Uint32(data[entryOffset+8 : entryOffset+12])
+			gpsSubIfdPointer := helper.GetUint32(entryOffset)
 			gpsIfdOffset := tiffStart + int(gpsSubIfdPointer)
 			extractGPSIFD(gpsIfdOffset, &metadata, &helper)
+		case XPTitle:
+			metadata.Authorship.XPTitle = helper.GetUTF16LEString(entry, entryOffset)
+		case XPComment:
+			metadata.Authorship.XPComment = helper.GetUTF16LEString(entry, entryOffset)
+		case XPAuthor:
+			metadata.Authorship.XPAuthor = helper.GetUTF16LEString(entry, entryOffset)
+		case XPKeywords:
+			metadata.Authorship.XPKeywords = helper.GetUTF16LEString(entry, entryOffset)
+		case XPSubject:
+			metadata.Authorship.XPSubject = helper.GetUTF16LEString(entry, entryOffset)
 		}
 	}
 

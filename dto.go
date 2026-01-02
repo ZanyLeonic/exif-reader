@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 type EXIFTag uint16
@@ -252,6 +253,10 @@ func (e *ExifValueExtractor) GetString(entry IFDEntry, entryOffset int) string {
 	return getEXIFString(e.data, entryOffset, offset, int(entry.Count))
 }
 
+func (e *ExifValueExtractor) GetUint32(entryOffset int) uint32 {
+	return getEXIFuInt32(e.data, entryOffset, e.endian)
+}
+
 func (e *ExifValueExtractor) GetUint16(entryOffset int) uint16 {
 	return getEXIFuInt16(e.data, entryOffset, e.endian)
 }
@@ -276,11 +281,30 @@ func (e *ExifValueExtractor) GetGPSCoord(entry IFDEntry) float64 {
 	return getGPSCoord(e.data, offset, e.endian)
 }
 
-func getEXIFString(data []byte, entryOffset, offset, count int) string {
-	if count <= 4 {
-		return strings.TrimRight(string(data[entryOffset+8:entryOffset+8+count]), "\x00")
+func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) string {
+	var offset int
+	if entry.Count*2 <= 4 {
+		offset = entryOffset + 8
+	} else {
+		offset = e.tiffStart + int(entry.ValueOffset)
 	}
-	return strings.TrimRight(string(data[offset:offset+count]), "\x00")
+
+	charCount := entry.Count / 2
+
+	if offset < 0 || offset+int(entry.Count)*2 > len(e.data) {
+		return ""
+	}
+
+	// Windows XP Exif tags are always WCHAR (or UTF-16LE) regardless of the EXIF byte order
+	utf16Data := make([]uint16, charCount)
+	for i := 0; i < int(charCount); i++ {
+		utf16Data[i] = binary.LittleEndian.Uint16(e.data[offset+i*2 : offset+i*2+2])
+	}
+
+	runes := utf16.Decode(utf16Data)
+	result := string(runes)
+
+	return strings.TrimRight(result, "\x00")
 }
 
 func parseOrientationValue(raw uint16) string {
