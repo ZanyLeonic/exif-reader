@@ -118,8 +118,8 @@ type GPSExif struct {
 	MapDatum             string    `json:"mapDatum"`
 	DestinationLatitude  float64   `json:"destinationLatitude"`
 	DestinationLongitude float64   `json:"destinationLongitude"`
-	DestinationBearing   float64   `json:"destinationBearing"`
-	DestinationDistance  float64   `json:"destinationDistance"`
+	DestinationBearing   string    `json:"destinationBearing"`
+	DestinationDistance  string    `json:"destinationDistance"`
 	ProcessingMethod     string    `json:"processingMethod"`
 	Differential         string    `json:"differential"`
 }
@@ -256,8 +256,18 @@ func (e *ExifValueExtractor) GetUint16(entryOffset int) uint16 {
 	return getEXIFuInt16(e.data, entryOffset, e.endian)
 }
 
-func (e *ExifValueExtractor) GetRational(entry IFDEntry) float64 {
-	offset := e.tiffStart + int(entry.ValueOffset)
+func (e *ExifValueExtractor) GetUint8(entryOffset int) uint8 {
+	return getEXIFuInt8(e.data, entryOffset)
+}
+
+func (e *ExifValueExtractor) GetUint8Array(entryOffset, numSlices int) []uint8 {
+	val := make([]uint8, numSlices)
+	copy(val, e.data[entryOffset+8:entryOffset+8+numSlices])
+	return val
+}
+
+func (e *ExifValueExtractor) GetRational(entry IFDEntry, nestedOffset int) float64 {
+	offset := e.tiffStart + int(entry.ValueOffset) + nestedOffset
 	return getEXIFRational(e.data, offset, e.endian)
 }
 
