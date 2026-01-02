@@ -32,6 +32,17 @@ func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
 	return float64(numerator) / float64(denominator)
 }
 
+func getEXIFRationalParts(data []byte, offset int, endian binary.ByteOrder) (uint32, uint32) {
+	if offset < 0 || offset >= len(data) {
+		return 0, 0
+	}
+
+	numerator := endian.Uint32(data[offset : offset+4])
+	denominator := endian.Uint32(data[offset+4 : offset+8])
+
+	return numerator, denominator
+}
+
 func getEXIFuInt32(data []byte, offset int, endian binary.ByteOrder) uint32 {
 	if offset < 0 || offset >= len(data) {
 		return 0
@@ -152,6 +163,8 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 			metadata.Temporal.ModifyDate = parsed
 		case Artist:
 			metadata.Authorship.Artist = helper.GetString(entry, entryOffset)
+		case Copyright:
+			metadata.Authorship.Copyright = helper.GetString(entry, entryOffset)
 		case EXIFSubIFD:
 			exifSubIfdPointer := helper.GetUint32(entryOffset)
 			exifIfdOffset := tiffStart + int(exifSubIfdPointer)
@@ -189,6 +202,23 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 			"valueOffset", entry.ValueOffset)
 
 		switch entry.Tag {
+		case ExposureTime:
+			num, den := helper.GetRationalParts(entry, 0)
+			metadata.Camera.ExposureTime = formatExposureTime(num, den)
+		case FNumber:
+			metadata.Camera.FNumber = helper.GetRational(entry, 0)
+		case ExposureProgram:
+			metadata.Camera.ExposureProgram = parseExposureProgram(helper.GetUint16(entryOffset))
+		case ISO:
+			metadata.Camera.ISO = int(helper.GetUint16(entryOffset))
+		case ExifVersion:
+			if entry.Count == 4 && entryOffset+12 <= len(helper.data) {
+				raw := helper.data[entryOffset+8 : entryOffset+12]
+				// Convert "0232" → "2.32"
+				if len(raw) == 4 {
+					metadata.Image.ExifVersion = fmt.Sprintf("%c.%c%c", raw[1], raw[2], raw[3])
+				}
+			}
 		case DateCaptured:
 			dateStr := helper.GetString(entry, entryOffset)
 			captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
@@ -197,6 +227,29 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 				continue
 			}
 			metadata.Temporal.DateCaptured = captured
+		case CreateDate:
+			dateStr := helper.GetString(entry, entryOffset)
+			captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
+			if err != nil {
+				slog.Warn("Found createdate timestamp, but it is an invalid format!", "createDate", dateStr, "error", err)
+				continue
+			}
+			metadata.Temporal.CreateDate = captured
+		case OffsetTime:
+			metadata.Temporal.OffsetTime = helper.GetString(entry, entryOffset)
+		case OffsetTimeOriginal:
+			metadata.Temporal.OffsetTimeOriginal = helper.GetString(entry, entryOffset)
+		case OffsetTimeDigitized:
+			metadata.Temporal.OffsetTimeDigitized = helper.GetString(entry, entryOffset)
+		case ComponentsConfiguration:
+			if entry.Count == 4 {
+				components := helper.GetUint8Array(entryOffset, 4)
+				metadata.Image.ComponentsConfig = parseComponentsConfiguration(components)
+			}
+		case MeteringMode:
+			metadata.Camera.MeteringMode = parseMeteringMode(helper.GetUint16(entryOffset))
+		case LightSource:
+			metadata.Camera.LightSource = parseLightSource(helper.GetUint16(entryOffset))
 		case PixelXDimension:
 			metadata.Image.PixelXDimension = float64(helper.GetUint16(entryOffset))
 		case PixelYDimension:

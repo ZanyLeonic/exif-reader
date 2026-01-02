@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -21,6 +22,7 @@ const (
 	Software           EXIFTag = 0x0131
 	ModifyDate         EXIFTag = 0x0132
 	Artist             EXIFTag = 0x013b
+	Copyright          EXIFTag = 0x8298
 	EXIFSubIFD         EXIFTag = 0x8769
 	GPSSubIFD          EXIFTag = 0x8825
 	XPTitle            EXIFTag = 0x9c9b
@@ -32,7 +34,6 @@ const (
 
 // EXIF Sub-IFD Tags
 const (
-	Copyright               EXIFTag = 0x8298
 	ExposureTime            EXIFTag = 0x829a
 	FNumber                 EXIFTag = 0x829d
 	ExposureProgram         EXIFTag = 0x8822
@@ -276,6 +277,11 @@ func (e *ExifValueExtractor) GetRational(entry IFDEntry, nestedOffset int) float
 	return getEXIFRational(e.data, offset, e.endian)
 }
 
+func (e *ExifValueExtractor) GetRationalParts(entry IFDEntry, nestedOffset int) (uint32, uint32) {
+	offset := e.tiffStart + int(entry.ValueOffset) + nestedOffset
+	return getEXIFRationalParts(e.data, offset, e.endian)
+}
+
 func (e *ExifValueExtractor) GetGPSCoord(entry IFDEntry) float64 {
 	offset := e.tiffStart + int(entry.ValueOffset)
 	return getGPSCoord(e.data, offset, e.endian)
@@ -327,6 +333,88 @@ func parseOrientationValue(raw uint16) string {
 		return "Rotate 270 CW"
 	default:
 		return "Unknown"
+	}
+}
+
+func parseExposureProgram(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Not Defined"
+	case 1:
+		return "Manual"
+	case 2:
+		return "Program AE"
+	case 3:
+		return "Aperture-priority AE"
+	case 4:
+		return "Shutter speed priority AE"
+	case 5:
+		return "Creative (Slow speed)"
+	case 6:
+		return "Action (High speed)"
+	case 7:
+		return "Portrait"
+	case 8:
+		return "Landscape"
+	case 9:
+		return "Bulb"
+	default:
+		return "Unknown"
+	}
+}
+
+func parseComponentsConfiguration(components []uint8) string {
+	var names []string
+	for _, comp := range components {
+		switch comp {
+		case 0:
+			names = append(names, "-")
+		case 1:
+			names = append(names, "Y")
+		case 2:
+			names = append(names, "Cb")
+		case 3:
+			names = append(names, "Cr")
+		case 4:
+			names = append(names, "R")
+		case 5:
+			names = append(names, "G")
+		case 6:
+			names = append(names, "B")
+		default:
+			names = append(names, "?")
+		}
+	}
+	return strings.Join(names, "")
+}
+
+func parseMeteringMode(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Unknown"
+	case 1:
+		return "Average"
+	case 2:
+		return "Center-weighted average"
+	case 3:
+		return "Spot"
+	case 4:
+		return "Multi-spot"
+	case 5:
+		return "Multi-segment"
+	case 6:
+		return "Partial"
+	case 255:
+		return "Other"
+	default:
+		return "Not Defined"
+	}
+}
+
+func parseLightSource(raw uint16) string {
+	switch raw {
+	default:
+		return "Not Defined"
 	}
 }
 
@@ -389,4 +477,23 @@ func parseFlashValue(raw uint16) string {
 	default:
 		return "Unknown"
 	}
+}
+
+func formatExposureTime(num, den uint32) string {
+	if den == 0 {
+		return "Invalid"
+	}
+
+	// For exposure >= 1 second, show a decimal
+	if num >= den {
+		seconds := float64(num) / float64(den)
+		if seconds == float64(int(seconds)) {
+			return fmt.Sprintf("%ds", int(seconds))
+		}
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+
+	reciprocal := int((float64(den) / float64(num)) + 0.5)
+
+	return fmt.Sprintf("1/%d", reciprocal)
 }
