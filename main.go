@@ -245,7 +245,7 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 		case LightSource:
 			metadata.Camera.LightSource = parseLightSource(helper.GetUint16(entryOffset))
 		case FlashFired:
-			metadata.Camera.Flash = parseFlashValue(helper.GetUint16(entryOffset))
+			metadata.Camera.FlashFired = parseFlashValue(helper.GetUint16(entryOffset))
 		case FocalLength:
 			metadata.Camera.FocalLength = helper.GetRational(entry, 0)
 		case UserComment:
@@ -453,7 +453,7 @@ func extractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ExifV
 		metadata.GPS.DestinationBearing = fmt.Sprintf("%f%s", destBearing, destBearingRef)
 	}
 	if hasDestDistance && destDistanceRef != "" {
-		metadata.GPS.DestinationBearing = fmt.Sprintf("%f%s", destDistance, destDistanceRef)
+		metadata.GPS.DestinationDistance = fmt.Sprintf("%f%s", destDistance, destDistanceRef)
 	}
 
 	if hasTime && dateStr != "" {

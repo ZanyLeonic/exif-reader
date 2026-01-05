@@ -176,7 +176,6 @@ type CameraSettings struct {
 	FocalLength          float64 `json:"focalLength"`
 	MeteringMode         string  `json:"meteringMode"`
 	LightSource          string  `json:"lightSource"`
-	Flash                string  `json:"flash"`
 	FlashFired           string  `json:"flashFired"`
 	WhiteBalance         string  `json:"whiteBalance"`
 	SceneCaptureType     string  `json:"sceneCaptureType"`
