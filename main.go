@@ -6,71 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 )
-
-func getEXIFString(data []byte, entryOffset, offset, count int) string {
-	if count <= 4 {
-		return strings.TrimRight(string(data[entryOffset+8:entryOffset+8+count]), "\x00")
-	}
-	return strings.TrimRight(string(data[offset:offset+count]), "\x00")
-}
-
-func getEXIFRational(data []byte, offset int, endian binary.ByteOrder) float64 {
-	if offset < 0 || offset >= len(data) {
-		return 0
-	}
-
-	numerator := endian.Uint32(data[offset : offset+4])
-	denominator := endian.Uint32(data[offset+4 : offset+8])
-
-	if denominator == 0 {
-		return 0
-	}
-
-	return float64(numerator) / float64(denominator)
-}
-
-func getEXIFRationalParts(data []byte, offset int, endian binary.ByteOrder) (uint32, uint32) {
-	if offset < 0 || offset >= len(data) {
-		return 0, 0
-	}
-
-	numerator := endian.Uint32(data[offset : offset+4])
-	denominator := endian.Uint32(data[offset+4 : offset+8])
-
-	return numerator, denominator
-}
-
-func getEXIFuInt32(data []byte, offset int, endian binary.ByteOrder) uint32 {
-	if offset < 0 || offset >= len(data) {
-		return 0
-	}
-	return endian.Uint32(data[offset+8 : offset+12])
-}
-
-func getEXIFuInt16(data []byte, offset int, endian binary.ByteOrder) uint16 {
-	if offset < 0 || offset >= len(data) {
-		return 0
-	}
-	return endian.Uint16(data[offset+8 : offset+10])
-}
-
-func getEXIFuInt8(data []byte, offset int) uint8 {
-	if offset < 0 || offset >= len(data) {
-		return 0
-	}
-	return data[offset]
-}
-
-func getGPSCoord(data []byte, offset int, endian binary.ByteOrder) float64 {
-	degrees := getEXIFRational(data, offset, endian)
-	minutes := getEXIFRational(data, offset+8, endian)
-	seconds := getEXIFRational(data, offset+16, endian)
-
-	return degrees + (minutes / 60.0) + (seconds / 3600.0)
-}
 
 func findAPP1Segment(data []byte) (int, error) {
 	// does the file have the JPEG Magic Number

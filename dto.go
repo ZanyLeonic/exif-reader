@@ -248,21 +248,75 @@ type ExifValueExtractor struct {
 	endian    binary.ByteOrder
 }
 
+// getString extracts a string value from EXIF data
+func (e *ExifValueExtractor) getString(entryOffset, offset, count int) string {
+	if count <= 4 {
+		return strings.TrimRight(string(e.data[entryOffset+8:entryOffset+8+count]), "\x00")
+	}
+	return strings.TrimRight(string(e.data[offset:offset+count]), "\x00")
+}
+
+// getRational extracts a rational value (numerator/denominator) from EXIF data
+func (e *ExifValueExtractor) getRational(offset int) float64 {
+	if offset < 0 || offset+8 > len(e.data) {
+		return 0
+	}
+
+	numerator := e.endian.Uint32(e.data[offset : offset+4])
+	denominator := e.endian.Uint32(e.data[offset+4 : offset+8])
+
+	if denominator == 0 {
+		return 0
+	}
+
+	return float64(numerator) / float64(denominator)
+}
+
+// getRationalParts extracts the raw numerator and denominator from EXIF data
+func (e *ExifValueExtractor) getRationalParts(offset int) (uint32, uint32) {
+	if offset < 0 || offset+8 > len(e.data) {
+		return 0, 0
+	}
+
+	numerator := e.endian.Uint32(e.data[offset : offset+4])
+	denominator := e.endian.Uint32(e.data[offset+4 : offset+8])
+
+	return numerator, denominator
+}
+
+// getGPSCoordinate calculates GPS coordinates from degrees, minutes, seconds
+func (e *ExifValueExtractor) getGPSCoordinate(offset int) float64 {
+	degrees := e.getRational(offset)
+	minutes := e.getRational(offset + 8)
+	seconds := e.getRational(offset + 16)
+
+	return degrees + (minutes / 60.0) + (seconds / 3600.0)
+}
+
 func (e *ExifValueExtractor) GetString(entry IFDEntry, entryOffset int) string {
 	offset := e.tiffStart + int(entry.ValueOffset)
-	return getEXIFString(e.data, entryOffset, offset, int(entry.Count))
+	return e.getString(entryOffset, offset, int(entry.Count))
 }
 
 func (e *ExifValueExtractor) GetUint32(entryOffset int) uint32 {
-	return getEXIFuInt32(e.data, entryOffset, e.endian)
+	if entryOffset < 0 || entryOffset+12 > len(e.data) {
+		return 0
+	}
+	return e.endian.Uint32(e.data[entryOffset+8 : entryOffset+12])
 }
 
 func (e *ExifValueExtractor) GetUint16(entryOffset int) uint16 {
-	return getEXIFuInt16(e.data, entryOffset, e.endian)
+	if entryOffset < 0 || entryOffset+10 > len(e.data) {
+		return 0
+	}
+	return e.endian.Uint16(e.data[entryOffset+8 : entryOffset+10])
 }
 
 func (e *ExifValueExtractor) GetUint8(entryOffset int) uint8 {
-	return getEXIFuInt8(e.data, entryOffset)
+	if entryOffset < 0 || entryOffset+8 >= len(e.data) {
+		return 0
+	}
+	return e.data[entryOffset+8]
 }
 
 func (e *ExifValueExtractor) GetUint8Array(entryOffset, numSlices int) []uint8 {
@@ -273,43 +327,17 @@ func (e *ExifValueExtractor) GetUint8Array(entryOffset, numSlices int) []uint8 {
 
 func (e *ExifValueExtractor) GetRational(entry IFDEntry, nestedOffset int) float64 {
 	offset := e.tiffStart + int(entry.ValueOffset) + nestedOffset
-	return getEXIFRational(e.data, offset, e.endian)
+	return e.getRational(offset)
 }
 
 func (e *ExifValueExtractor) GetRationalParts(entry IFDEntry, nestedOffset int) (uint32, uint32) {
 	offset := e.tiffStart + int(entry.ValueOffset) + nestedOffset
-	return getEXIFRationalParts(e.data, offset, e.endian)
+	return e.getRationalParts(offset)
 }
 
 func (e *ExifValueExtractor) GetGPSCoord(entry IFDEntry) float64 {
 	offset := e.tiffStart + int(entry.ValueOffset)
-	return getGPSCoord(e.data, offset, e.endian)
-}
-
-func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) string {
-	var offset int
-	if entry.Count*2 <= 4 {
-		offset = entryOffset + 8
-	} else {
-		offset = e.tiffStart + int(entry.ValueOffset)
-	}
-
-	charCount := entry.Count / 2
-
-	if offset < 0 || offset+int(entry.Count)*2 > len(e.data) {
-		return ""
-	}
-
-	// Windows XP Exif tags are always WCHAR (or UTF-16LE) regardless of the EXIF byte order
-	utf16Data := make([]uint16, charCount)
-	for i := 0; i < int(charCount); i++ {
-		utf16Data[i] = binary.LittleEndian.Uint16(e.data[offset+i*2 : offset+i*2+2])
-	}
-
-	runes := utf16.Decode(utf16Data)
-	result := string(runes)
-
-	return strings.TrimRight(result, "\x00")
+	return e.getGPSCoordinate(offset)
 }
 
 func (e *ExifValueExtractor) GetByteArray(entry IFDEntry, entryOffset int) []byte {
@@ -367,6 +395,42 @@ func (e *ExifValueExtractor) GetCompositeImageCount(entry IFDEntry, entryOffset 
 	usedNum := e.endian.Uint16(e.data[offset+2 : offset+4])
 
 	return sourceNum, usedNum
+}
+
+func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) string {
+	var offset int
+	if entry.Count*2 <= 4 {
+		offset = entryOffset + 8
+	} else {
+		offset = e.tiffStart + int(entry.ValueOffset)
+	}
+
+	if offset < 0 || offset+int(entry.Count) > len(e.data) {
+		return ""
+	}
+
+	// Convert byte count to uint16 count
+	charCount := int(entry.Count) / 2
+	if charCount == 0 {
+		return ""
+	}
+
+	// Read UTF-16LE encoded data
+	utf16Data := make([]uint16, charCount)
+	for i := 0; i < charCount; i++ {
+		if offset+i*2+2 > len(e.data) {
+			break
+		}
+		utf16Data[i] = binary.LittleEndian.Uint16(e.data[offset+i*2 : offset+i*2+2])
+	}
+
+	// Decode UTF-16 to UTF-8 string
+	runes := utf16.Decode(utf16Data)
+	result := string(runes)
+
+	// Trim null terminators and any trailing whitespace
+	result = strings.TrimRight(result, "\x00")
+	return strings.TrimSpace(result)
 }
 
 func parseOrientationValue(raw uint16) string {
