@@ -142,7 +142,7 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		case ImageWidth:
 			metadata.Image.Width = int(helper.GetUint32(entryOffset))
 		case ImageHeight:
-			metadata.Image.Width = int(helper.GetUint32(entryOffset))
+			metadata.Image.Height = int(helper.GetUint32(entryOffset))
 		case ImageDescription:
 			metadata.Authorship.ImageDescription = helper.GetString(entry, entryOffset)
 		case Make:
@@ -212,13 +212,7 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 		case ISO:
 			metadata.Camera.ISO = int(helper.GetUint16(entryOffset))
 		case ExifVersion:
-			if entry.Count == 4 && entryOffset+12 <= len(helper.data) {
-				raw := helper.data[entryOffset+8 : entryOffset+12]
-				// Convert "0232" → "2.32"
-				if len(raw) == 4 {
-					metadata.Image.ExifVersion = fmt.Sprintf("%c.%c%c", raw[1], raw[2], raw[3])
-				}
-			}
+			metadata.Image.ExifVersion = helper.GetVersion(entry, entryOffset)
 		case DateCaptured:
 			dateStr := helper.GetString(entry, entryOffset)
 			captured, err := time.Parse("2006:01:02 15:04:05", dateStr)
@@ -250,12 +244,74 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 			metadata.Camera.MeteringMode = parseMeteringMode(helper.GetUint16(entryOffset))
 		case LightSource:
 			metadata.Camera.LightSource = parseLightSource(helper.GetUint16(entryOffset))
+		case FlashFired:
+			metadata.Camera.Flash = parseFlashValue(helper.GetUint16(entryOffset))
+		case FocalLength:
+			metadata.Camera.FocalLength = helper.GetRational(entry, 0)
+		case UserComment:
+			metadata.Authorship.UserComment = helper.GetUserComment(entry, entryOffset)
+		case SubSecTime:
+			metadata.Temporal.SubSecTime = helper.GetString(entry, entryOffset)
+		case SubSecTimeOriginal:
+			metadata.Temporal.SubSecTimeOriginal = helper.GetString(entry, entryOffset)
+		case SubSecTimeDigitized:
+			metadata.Temporal.SubSecTimeDigitized = helper.GetString(entry, entryOffset)
+		case FlashpixVersion:
+			metadata.Image.FlashpixVersion = helper.GetVersion(entry, entryOffset)
+		case ColorSpace:
+			metadata.Image.ColorSpace = parseColourSpace(helper.GetUint16(entryOffset))
 		case PixelXDimension:
 			metadata.Image.PixelXDimension = float64(helper.GetUint16(entryOffset))
 		case PixelYDimension:
 			metadata.Image.PixelYDimension = float64(helper.GetUint16(entryOffset))
-		case FlashFired:
-			metadata.Camera.Flash = parseFlashValue(helper.GetUint16(entryOffset))
+		case RelatedSoundFile:
+			metadata.Authenticity.RelatedSoundFile = helper.GetString(entry, entryOffset)
+		case FileSource:
+			metadata.Image.FileSource = parseFileSource(helper.GetUint8(entryOffset))
+		case SceneType:
+			rawVal := helper.GetUint8(entryOffset)
+			if rawVal == 0x01 {
+				metadata.Image.SceneType = "Directly Photographed"
+			} else {
+				metadata.Image.SceneType = "Unknown"
+			}
+		case WhiteBalance:
+			metadata.Camera.WhiteBalance = helper.GetString(entry, entryOffset)
+		case DigitalZoomRatio:
+			metadata.Processing.DigitalZoomRatio = helper.GetRational(entry, 0)
+		case SceneCaptureType:
+			metadata.Camera.SceneCaptureType = parseSceneType(helper.GetUint16(entryOffset))
+		case Contrast:
+			metadata.Processing.Contrast = parseProcessing(helper.GetUint16(entryOffset))
+		case Saturation:
+			metadata.Processing.Saturation = parseProcessing(helper.GetUint16(entryOffset))
+		case Sharpness:
+			metadata.Processing.Sharpness = parseProcessing(helper.GetUint16(entryOffset))
+		case SubjectDistanceRange:
+			metadata.Camera.SubjectDistanceRange = parseSubjectDistanceRange(helper.GetUint16(entryOffset))
+		case ImageUniqueID:
+			metadata.Authenticity.ImageUniqueID = helper.GetString(entry, entryOffset)
+		case BodySerialNumber:
+			metadata.Device.BodySerialNumber = helper.GetString(entry, entryOffset)
+		case LensInfo:
+			metadata.Device.LensInfo = helper.GetString(entry, entryOffset)
+		case LensMake:
+			metadata.Device.LensMake = helper.GetString(entry, entryOffset)
+		case LensModel:
+			metadata.Device.LensModel = helper.GetString(entry, entryOffset)
+		case LensSerialNumber:
+			metadata.Device.LensSerialNumber = helper.GetString(entry, entryOffset)
+		case ImageEditor:
+			metadata.Processing.ImageEditor = helper.GetString(entry, entryOffset)
+		case CameraFirmware:
+			metadata.Device.CameraFirmware = helper.GetString(entry, entryOffset)
+		case CompositeImage:
+			metadata.Processing.CompositeImage = parseCompositeImage(helper.GetUint16(entryOffset))
+		case CompositeImageCount:
+			sourceNum, usedNum := helper.GetCompositeImageCount(entry, entryOffset)
+			metadata.Processing.CompositeImageCount = fmt.Sprintf("%d/%d", sourceNum, usedNum)
+		case SerialNumber:
+			metadata.Device.SerialNumber = helper.GetString(entry, entryOffset)
 		}
 	}
 }

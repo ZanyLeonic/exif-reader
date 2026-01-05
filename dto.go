@@ -193,7 +193,7 @@ type ProcessingData struct {
 	Saturation          string  `json:"saturation"`
 	Sharpness           string  `json:"sharpness"`
 	CompositeImage      string  `json:"compositeImage"`
-	CompositeImageCount int     `json:"compositeImageCount"`
+	CompositeImageCount string  `json:"compositeImageCount"`
 }
 
 // AuthorshipData Authorship and chain of custody
@@ -313,6 +313,63 @@ func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) s
 	return strings.TrimRight(result, "\x00")
 }
 
+func (e *ExifValueExtractor) GetByteArray(entry IFDEntry, entryOffset int) []byte {
+	var offset int
+	if entry.Count <= 4 {
+		offset = entryOffset + 8
+	} else {
+		offset = e.tiffStart + int(entry.ValueOffset)
+	}
+
+	if offset < 0 || offset+int(entry.Count) > len(e.data) {
+		return nil
+	}
+
+	result := make([]byte, entry.Count)
+	copy(result, e.data[offset:offset+int(entry.Count)])
+	return result
+}
+
+func (e *ExifValueExtractor) GetUserComment(entry IFDEntry, entryOffset int) string {
+	raw := e.GetByteArray(entry, entryOffset)
+	if len(raw) <= 8 {
+		return ""
+	}
+	// Skip the 8-byte character code prefix
+	return strings.TrimRight(string(raw[8:]), "\x00")
+}
+
+func (e *ExifValueExtractor) GetVersion(entry IFDEntry, entryOffset int) string {
+	if entry.Count != 4 || entryOffset+12 > len(e.data) {
+		return ""
+	}
+	raw := e.data[entryOffset+8 : entryOffset+12]
+	// Convert "0232" → "2.32"
+	return fmt.Sprintf("%c.%c%c", raw[1], raw[2], raw[3])
+}
+
+func (e *ExifValueExtractor) GetCompositeImageCount(entry IFDEntry, entryOffset int) (uint16, uint16) {
+	if entry.Count < 2 {
+		return 0, 0
+	}
+
+	var offset int
+	if entry.Count*2 <= 4 {
+		offset = entryOffset + 8
+	} else {
+		offset = e.tiffStart + int(entry.ValueOffset)
+	}
+
+	if offset+4 > len(e.data) {
+		return 0, 0
+	}
+
+	sourceNum := e.endian.Uint16(e.data[offset : offset+2])
+	usedNum := e.endian.Uint16(e.data[offset+2 : offset+4])
+
+	return sourceNum, usedNum
+}
+
 func parseOrientationValue(raw uint16) string {
 	switch raw {
 	case 1:
@@ -413,8 +470,69 @@ func parseMeteringMode(raw uint16) string {
 
 func parseLightSource(raw uint16) string {
 	switch raw {
+	case 0:
+		return "Unknown"
+	case 1:
+		return "Daylight"
+	case 2:
+		return "Fluorescent"
+	case 3:
+		return "Tungsten (Incandescent)"
+	case 4:
+		return "Flash"
+	case 9:
+		return "Fine Weather"
+	case 10:
+		return "Cloudy"
+	case 11:
+		return "Shade"
+	case 12:
+		return "Daylight Fluorescent"
+	case 13:
+		return "Day White Fluorescent"
+	case 14:
+		return "Cool White Fluorescent"
+	case 15:
+		return "White Fluorescent"
+	case 16:
+		return "Warm White Fluorescent"
+	case 17:
+		return "Standard Light A"
+	case 18:
+		return "Standard Light B"
+	case 19:
+		return "Standard Light C"
+	case 20:
+		return "D55"
+	case 21:
+		return "D65"
+	case 22:
+		return "D75"
+	case 23:
+		return "D50"
+	case 24:
+		return "ISO Studio Tungsten"
+	case 255:
+		return "Other"
 	default:
 		return "Not Defined"
+	}
+}
+
+func parseColourSpace(raw uint16) string {
+	switch raw {
+	case 0x1:
+		return "sRGB"
+	case 0x2:
+		return "Adobe RGB"
+	case 0xfffd:
+		return "Wide Gamut RGB"
+	case 0xfffe:
+		return "ICC Profile"
+	case 0xffff:
+		return "Uncalibrated"
+	default:
+		return "None"
 	}
 }
 
@@ -496,4 +614,78 @@ func formatExposureTime(num, den uint32) string {
 	reciprocal := int((float64(den) / float64(num)) + 0.5)
 
 	return fmt.Sprintf("1/%d", reciprocal)
+}
+
+func parseFileSource(raw uint8) string {
+	switch raw {
+	case 0x1:
+		return "Film Scanner (Transparent Scanner)"
+	case 0x2:
+		return "Film Scanner (Relection Print Scanner)"
+	case 0x3:
+		return "Digital Camera"
+	default:
+		return "Unknown"
+	}
+}
+
+func parseSceneType(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Standard"
+	case 1:
+		return "Landscape"
+	case 2:
+		return "Portrait"
+	case 3:
+		return "Night"
+	case 4:
+		return "Other"
+	default:
+		return "Unknown"
+	}
+}
+
+// parseProcessing for Contrast, Saturation, and Sharpness
+func parseProcessing(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Normal"
+	case 1:
+		return "Low"
+	case 2:
+		return "High"
+	default:
+		return "Unknown or not set"
+	}
+}
+
+func parseSubjectDistanceRange(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Unknown"
+	case 1:
+		return "Macro"
+	case 2:
+		return "Close"
+	case 3:
+		return "Distant"
+	default:
+		return "Not defined"
+	}
+}
+
+func parseCompositeImage(raw uint16) string {
+	switch raw {
+	case 0:
+		return "Unknown"
+	case 1:
+		return "Not a Composite Image"
+	case 2:
+		return "General Composite Image"
+	case 3:
+		return "Composite Image Captured While Shooting"
+	default:
+		return "Not defined"
+	}
 }
