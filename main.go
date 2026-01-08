@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -123,6 +125,100 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		}
 	}
 
+	output, err := extractXMPData(data)
+	if err != nil {
+		slog.Error("Error extracting XMP metadata", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Found XMP data", "xmp", output)
+	xmp := helper.DecodeGoogleHDRPNotes([]byte(output))
+
+	output, err = extractExtXMPData(data, xmp.RDF.Description.HasExtendedXMP)
+	if err != nil {
+		slog.Error("Error extracting XMP metadata", "error", err)
+		os.Exit(1)
+	}
+
+	// slog.Info("Found Extended XMP data", "xmp", output)
+	os.WriteFile("extracted_extended_xmp.xml", []byte(output), 0644)
+	extXmp := helper.DecodeGoogleHDRPNotes([]byte(output))
+
+	// Sanitize the base64 string to remove invalid characters
+	rawBase64 := extXmp.RDF.Description.HdrPlusMakerNote
+	os.WriteFile("base64_from_xml.txt", []byte(rawBase64), 0644)
+
+	// Debug: Detailed inspection around position 67284 to find control characters
+	if len(rawBase64) > 67300 {
+		start := 67270
+		end := 67310
+		if end > len(rawBase64) {
+			end = len(rawBase64)
+		}
+
+		// Write detailed analysis to file
+		var debugOutput strings.Builder
+		debugOutput.WriteString(fmt.Sprintf("Analyzing positions %d to %d\n\n", start, end))
+
+		// Scan for any non-base64 characters in this region
+		var problemChars []string
+		for i := start; i < end; i++ {
+			b := rawBase64[i]
+			isValid := (b >= 'A' && b <= 'Z') ||
+				(b >= 'a' && b <= 'z') ||
+				(b >= '0' && b <= '9') ||
+				b == '+' || b == '/' || b == '='
+
+			if !isValid {
+				problemChars = append(problemChars,
+					fmt.Sprintf("pos=%d char=0x%02X(%d)", i, b, b))
+				debugOutput.WriteString(fmt.Sprintf("INVALID at position %d: byte=0x%02X (%d)\n", i, b, b))
+			}
+		}
+
+		if len(problemChars) > 0 {
+			debugOutput.WriteString(fmt.Sprintf("\nTotal invalid chars found: %d\n", len(problemChars)))
+			debugOutput.WriteString("Details: " + strings.Join(problemChars, ", ") + "\n\n")
+		}
+
+		// Show hex dump
+		snippet := rawBase64[start:end]
+		debugOutput.WriteString("Hex dump:\n")
+		for i, b := range []byte(snippet) {
+			if i > 0 && i%16 == 0 {
+				debugOutput.WriteString("\n")
+			}
+			debugOutput.WriteString(fmt.Sprintf("%02X ", b))
+		}
+		debugOutput.WriteString("\n")
+
+		os.WriteFile("debug_base64_region.txt", []byte(debugOutput.String()), 0644)
+		slog.Info("Wrote debug analysis to debug_base64_region.txt")
+	}
+
+	cleanBase64 := sanitizeBase64String(rawBase64)
+	os.WriteFile("base64_cleaned.txt", []byte(cleanBase64), 0644)
+
+	slog.Info("Base64 lengths", "raw", len(rawBase64), "cleaned", len(cleanBase64))
+
+	// Try standard encoding first
+	encrypted, err := base64.StdEncoding.DecodeString(cleanBase64)
+	if err != nil {
+		slog.Warn("StdEncoding failed, trying RawStdEncoding", "error", err)
+		// Try without padding
+		encrypted, err = base64.RawStdEncoding.DecodeString(cleanBase64)
+		if err != nil {
+			slog.Error("Failed to decode HDRPlusMakerNote with both encodings", "error", err, "cleanedLength", len(cleanBase64))
+			os.Exit(1)
+		}
+	}
+
+	if string(encrypted[0:4]) == "HDRP" {
+		slog.Info("Found HDRPlus header")
+	}
+
+	slog.Info("Unmarshalled ExtXMP", "extXMP", extXmp)
+
 	return &metadata, nil
 }
 
@@ -185,6 +281,9 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 			metadata.Camera.FlashFired = parseFlashValue(helper.GetUint16(entryOffset))
 		case FocalLength:
 			metadata.Camera.FocalLength = helper.GetRational(entry, 0)
+		case MakerNote:
+		case 0xea1c:
+			metadata.Image.MakersNote = helper.DecodeMakerNote(entry)
 		case UserComment:
 			metadata.Authorship.UserComment = helper.GetUserComment(entry, entryOffset)
 		case SubSecTime:
@@ -404,8 +503,70 @@ func extractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ExifV
 	}
 }
 
+func extractXMPData(data []byte) (string, error) {
+	xmpHeader := "http://ns.adobe.com/xap/1.0/\x00"
+	for i := 0; i < len(data)-len(xmpHeader); i++ {
+		start := 0
+		if string(data[i:i+len(xmpHeader)]) == xmpHeader {
+			start = i
+		} else {
+			continue
+		}
+		end := start
+		for end < len(data)-11 {
+			if string(data[end:end+12]) == "</x:xmpmeta>" {
+				end += 12
+				return strings.TrimLeft(string(data[start:end]), xmpHeader), nil
+			}
+			end++
+		}
+		return "", errors.New("XMP end tag not found")
+	}
+	return "", errors.New("XMP block not found")
+}
+
+func extractExtXMPData(data []byte, extId string) (string, error) {
+	extHeader := fmt.Sprintf("http://ns.adobe.com/xmp/extension/\x00%s\x00", extId)
+	for i := 0; i < len(data)-len(extHeader); i++ {
+		start := 0
+		if string(data[i:i+len(extHeader)]) == extHeader {
+			start = i
+		} else {
+			continue
+		}
+		end := start
+		for end < len(data)-11 {
+			if string(data[end:end+12]) == "</x:xmpmeta>" {
+				end += 12
+				// Skip past the header by moving start position
+				start = start + len(extHeader)
+				xmlString := string(data[start:end])
+
+				// Find the actual XML start
+				tagStart := strings.Index(xmlString, "<x:xmpmeta")
+				if tagStart != -1 {
+					xmlString = xmlString[tagStart:]
+				}
+
+				var b strings.Builder
+				for _, c := range xmlString {
+					if c == '\uFFFD' {
+						continue
+					}
+					b.WriteRune(c)
+				}
+
+				return sanitizeXMLString(b.String()), nil
+			}
+			end++
+		}
+		return "", errors.New("XMP end tag not found")
+	}
+	return "", errors.New("XMP block not found")
+}
+
 func main() {
-	data, err := os.ReadFile("example.jpg")
+	data, err := os.ReadFile("pixel2.jpg")
 	if err != nil {
 		slog.Error("Error reading file", "error", err)
 		os.Exit(1)
