@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "github.com/ZanyLeonic/exif-reader/pb";
+
+message GoogleHDRPlusMakerNote {
+  ImageInfo image_info = 1;
+  string time_log_text = 2;
+  string summary_text = 3;
+  FrameInfo frame_count = 9;
+  DeviceInfo device_info = 12;
+}
+
+message ImageInfo {
+  string image_name = 1;
+  bytes image_data = 2;
+}
+
+message FrameInfo {
+  int32 frame_count = 3;
+  CreateDateInfo create_date_info = 36;
+}
+
+message CreateDateInfo {
+  string create_date = 1;
+}
+
+message DeviceInfo {
+  string device_make = 1;
+  string device_model = 2;
+  string device_codename = 3;
+  string device_hardware_revision = 4;
+  string HDRPSoftware = 6;
+  string AndroidRelease = 7;
+  string SoftwareDate = 8;
+  string Application = 9;
+  string AppVersion = 10;
+
+  ExposureTimeInfo exposure_time_info = 12;
+  ISOInfo iso_info = 13;
+
+  int32 MaxAnalogISO = 14;
+}
+
+message ExposureTimeInfo {
+  float exposure_time_min = 1;
+  float exposure_time_max = 2;
+}
+
+message ISOInfo {
+  int32 iso_min = 1;
+  int32 iso_max = 2;
+}
