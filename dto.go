@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/xml"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -109,6 +112,12 @@ const (
 	Differential     EXIFTag = 0x1e
 )
 
+type MakerNoteData struct {
+	Raw          []byte                 `json:"raw"`
+	Manufacturer string                 `json:"manufacturer"`
+	Parsed       map[string]interface{} `json:"parsed"`
+}
+
 type GPSExif struct {
 	Version              string    `json:"version"`
 	Altitude             float64   `json:"altitude"`
@@ -154,17 +163,18 @@ type DeviceData struct {
 
 // ImageProperties Image dimensions and properties
 type ImageProperties struct {
-	Width            int     `json:"width"`
-	Height           int     `json:"height"`
-	PixelXDimension  float64 `json:"pixelXDimension"`
-	PixelYDimension  float64 `json:"pixelYDimension"`
-	Orientation      string  `json:"orientation"`
-	ColorSpace       string  `json:"colorSpace"`
-	ComponentsConfig string  `json:"componentsConfiguration"`
-	FileSource       string  `json:"fileSource"`
-	SceneType        string  `json:"sceneType"`
-	ExifVersion      string  `json:"exifVersion"`
-	FlashpixVersion  string  `json:"flashpixVersion"`
+	Width            int           `json:"width"`
+	Height           int           `json:"height"`
+	PixelXDimension  float64       `json:"pixelXDimension"`
+	PixelYDimension  float64       `json:"pixelYDimension"`
+	Orientation      string        `json:"orientation"`
+	ColorSpace       string        `json:"colorSpace"`
+	ComponentsConfig string        `json:"componentsConfiguration"`
+	FileSource       string        `json:"fileSource"`
+	SceneType        string        `json:"sceneType"`
+	ExifVersion      string        `json:"exifVersion"`
+	FlashpixVersion  string        `json:"flashpixVersion"`
+	MakersNote       MakerNoteData `json:"makersNote"`
 }
 
 // CameraSettings Camera settings used during capture
@@ -431,6 +441,23 @@ func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) s
 	// Trim null terminators and any trailing whitespace
 	result = strings.TrimRight(result, "\x00")
 	return strings.TrimSpace(result)
+}
+
+func (e *ExifValueExtractor) DecodeMakerNote(entry IFDEntry) MakerNoteData {
+	raw := e.GetByteArray(entry, e.tiffStart+int(entry.ValueOffset))
+	slog.Info("MakerNote ID", "ID", string(raw[0:10]))
+
+	return MakerNoteData{}
+}
+
+func (e *ExifValueExtractor) DecodeGoogleHDRPNotes(inXml []byte) XmpMeta {
+	var xmp XmpMeta
+	err := xml.Unmarshal(inXml, &xmp)
+	if err != nil {
+		slog.Error("Cannot unmarshal XMP", "error", err)
+		return xmp
+	}
+	return xmp
 }
 
 func parseOrientationValue(raw uint16) string {
@@ -751,4 +778,174 @@ func parseCompositeImage(raw uint16) string {
 	default:
 		return "Not defined"
 	}
+}
+
+func sanitizeXMLString(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	re := regexp.MustCompile(`http://ns\.adobe\.com/xmp/extension/\x00[A-F0-9]+`)
+	s = re.ReplaceAllString(s, "")
+
+	// Remove illegal XML control characters
+	// XML spec allows only: tab (0x09), newline (0x0A), carriage return (0x0D)
+	// XML forbids: 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F
+	var result strings.Builder
+	result.Grow(len(s))
+
+	for _, r := range s {
+		// Keep if outside control char range OR is allowed whitespace
+		if r >= 0x20 || r == 0x09 || r == 0x0A || r == 0x0D {
+			result.WriteRune(r)
+		}
+		// Otherwise skip (illegal XML character like U+0008)
+	}
+
+	return result.String()
+}
+
+func sanitizeBase64String(s string) string {
+	var result strings.Builder
+	result.Grow(len(s))
+
+	var removedChars []rune
+	var controlCharCounts = make(map[string]int)
+
+	for _, r := range s {
+		// Keep only valid base64 characters (ASCII range only)
+		if (r >= 'A' && r <= 'Z') ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') ||
+			r == '+' || r == '/' || r == '=' {
+			result.WriteRune(r)
+		} else {
+			// Track what types of characters we're removing
+			if len(removedChars) < 100 {
+				removedChars = append(removedChars, r)
+			}
+
+			// Count specific control characters
+			switch r {
+			case 0x00:
+				controlCharCounts["NULL(0x00)"]++
+			case 0x08:
+				controlCharCounts["BACKSPACE(0x08)"]++
+			case 0x09:
+				controlCharCounts["TAB(0x09)"]++
+			case 0x0A:
+				controlCharCounts["LF(0x0A)"]++
+			case 0x0D:
+				controlCharCounts["CR(0x0D)"]++
+			case 0x1B:
+				controlCharCounts["ESC(0x1B)"]++
+			case 0x20:
+				controlCharCounts["SPACE(0x20)"]++
+			default:
+				if r < 0x20 {
+					controlCharCounts[fmt.Sprintf("CTRL(0x%02X)", r)]++
+				} else if r >= 0x7F {
+					controlCharCounts[fmt.Sprintf("UNICODE(U+%04X)", r)]++
+				} else {
+					controlCharCounts[fmt.Sprintf("OTHER('%c'/0x%02X)", r, r)]++
+				}
+			}
+		}
+	}
+
+	// Log what was removed if there were invalid characters
+	if len(removedChars) > 0 {
+		var charDetails []string
+		for i, r := range removedChars {
+			if i >= 10 { // Only show first 10 for brevity
+				charDetails = append(charDetails, fmt.Sprintf("... and %d more", len(removedChars)-10))
+				break
+			}
+
+			// Give descriptive names to control characters
+			var desc string
+			switch r {
+			case 0x00:
+				desc = "NULL(0x00)"
+			case 0x08:
+				desc = "BACKSPACE(0x08)"
+			case 0x09:
+				desc = "TAB(0x09)"
+			case 0x0A:
+				desc = "LF(0x0A)"
+			case 0x0D:
+				desc = "CR(0x0D)"
+			case 0x1B:
+				desc = "ESC(0x1B)"
+			case 0x20:
+				desc = "SPACE(0x20)"
+			default:
+				if r < 0x20 {
+					desc = fmt.Sprintf("CTRL(0x%02X)", r)
+				} else if r < 0x7F {
+					desc = fmt.Sprintf("'%c'(0x%02X)", r, r)
+				} else {
+					desc = fmt.Sprintf("U+%04X", r)
+				}
+			}
+			charDetails = append(charDetails, desc)
+		}
+
+		// Create summary of control character counts
+		var countSummary []string
+		for name, count := range controlCharCounts {
+			countSummary = append(countSummary, fmt.Sprintf("%s:%d", name, count))
+		}
+
+		slog.Info("Removed invalid characters from base64",
+			"totalRemoved", len(removedChars),
+			"first10", strings.Join(charDetails, ", "),
+			"summary", strings.Join(countSummary, ", "))
+	}
+
+	cleaned := result.String()
+
+	// Fix padding: base64 strings should have length divisible by 4
+	// Remove any existing padding first, then add correct padding
+	cleaned = strings.TrimRight(cleaned, "=")
+
+	// Calculate how many padding characters we need
+	mod := len(cleaned) % 4
+	if mod > 0 {
+		paddingNeeded := 4 - mod
+		slog.Info("Fixing base64 padding",
+			"originalLength", len(cleaned),
+			"mod4", mod,
+			"paddingAdded", paddingNeeded)
+		cleaned += strings.Repeat("=", paddingNeeded)
+	}
+
+	return cleaned
+}
+
+type ContainerItem struct {
+	Mime     string `xml:"Mime,attr"`
+	Semantic string `xml:"Semantic,attr"`
+	Length   int    `xml:"Length,attr,omitempty"`
+}
+
+type XmpMeta struct {
+	XMLName xml.Name `xml:"xmpmeta"`
+	RDF     struct {
+		XMLName     xml.Name `xml:"RDF"`
+		Description struct {
+			XMLName          xml.Name `xml:"Description"`
+			Version          string   `xml:"Version,attr"`
+			HasExtendedXMP   string   `xml:"HasExtendedXMP,attr"`
+			HdrPlusMakerNote string   `xml:"HdrPlusMakernote,attr"`
+			Directory        struct {
+				XMLName  xml.Name `xml:"Directory"`
+				Sequence struct {
+					XMLName xml.Name `xml:"Seq"`
+					Items   []struct {
+						XMLName       xml.Name      `xml:"li"`
+						ParseType     string        `xml:"parseType,attr"`
+						ContainerItem ContainerItem `xml:"Item"`
+					} `xml:"li"`
+				} `xml:"Seq"`
+			} `xml:"Directory"`
+		} `xml:"Description"`
+	} `xml:"RDF"`
 }
