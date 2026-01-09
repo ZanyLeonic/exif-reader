@@ -215,6 +215,30 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 
 	if string(encrypted[0:4]) == "HDRP" {
 		slog.Info("Found HDRPlus header")
+
+		decrypted, err := decryptHDRPBytes(encrypted[5:])
+		if err != nil {
+			return nil, err
+		}
+
+		protoBytes, err := readGzipContent(decrypted)
+		if err != nil {
+			return nil, err
+		}
+
+		// Try to parse the protobuf, even if truncated
+		hdrPlusNotes := pb.GoogleHDRPlusMakerNote{}
+		unmarshalOpts := proto.UnmarshalOptions{
+			DiscardUnknown: true,
+		}
+		err = unmarshalOpts.Unmarshal(protoBytes, &hdrPlusNotes)
+		if err != nil {
+			// Like ExifTool, treat protobuf parse errors as warnings
+			// The data is likely truncated, but we can still extract other EXIF data
+			slog.Warn("Protobuf parsing incomplete - data may be truncated or corrupted", "error", err, "dataSize", len(protoBytes))
+		} else {
+			slog.Info("Successfully parsed HDR Plus MakerNotes", "hasData", hdrPlusNotes.ProtoReflect().IsValid())
+		}
 	}
 
 	slog.Info("Unmarshalled ExtXMP", "extXMP", extXmp)
