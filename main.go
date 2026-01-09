@@ -239,6 +239,9 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		} else {
 			slog.Info("Successfully parsed HDR Plus MakerNotes", "hasData", hdrPlusNotes.ProtoReflect().IsValid())
 		}
+
+		// Populate the MakerNote data in the metadata struct
+		metadata.Image.MakersNote = convertHDRPlusToMakerNote(&hdrPlusNotes, encrypted)
 	}
 
 	slog.Info("Unmarshalled ExtXMP", "extXMP", extXmp)
@@ -586,7 +589,116 @@ func extractExtXMPData(data []byte, extId string) (string, error) {
 		}
 		return "", errors.New("XMP end tag not found")
 	}
-	return "", errors.New("XMP block not found")
+	return "", errors.New("extended XMP data not found")
+}
+
+// convertHDRPlusToMakerNote converts a GoogleHDRPlusMakerNote protobuf to MakerNoteData
+func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte) MakerNoteData {
+	parsed := make(map[string]interface{})
+
+	// Extract ImageInfo fields if available
+	if notes.GetImageInfo() != nil {
+		imageInfo := notes.GetImageInfo()
+		imageData := make(map[string]interface{})
+
+		if imageInfo.GetImageName() != "" {
+			imageData["imageName"] = imageInfo.GetImageName()
+		}
+		if len(imageInfo.GetImageData()) > 0 {
+			imageData["imageDataSize"] = len(imageInfo.GetImageData())
+		}
+
+		if len(imageData) > 0 {
+			parsed["imageInfo"] = imageData
+		}
+	}
+
+	// Extract text logs (truncate if too long)
+	if notes.GetTimeLogText() != "" {
+		timeLog := notes.GetTimeLogText()
+		parsed["timeLogText"] = timeLog
+	}
+
+	if notes.GetSummaryText() != "" {
+		summary := notes.GetSummaryText()
+		parsed["summaryText"] = summary
+	}
+
+	// Extract FrameInfo
+	if notes.GetFrameCount() != nil {
+		frameInfo := notes.GetFrameCount()
+		parsed["frameCount"] = frameInfo.GetFrameCount()
+	}
+
+	// Extract DeviceInfo
+	if notes.GetDeviceInfo() != nil {
+		deviceInfo := notes.GetDeviceInfo()
+		deviceData := make(map[string]interface{})
+
+		if deviceInfo.GetDeviceMake() != "" {
+			deviceData["make"] = deviceInfo.GetDeviceMake()
+		}
+		if deviceInfo.GetDeviceModel() != "" {
+			deviceData["model"] = deviceInfo.GetDeviceModel()
+		}
+		if deviceInfo.GetDeviceCodename() != "" {
+			deviceData["codename"] = deviceInfo.GetDeviceCodename()
+		}
+		if deviceInfo.GetDeviceHardwareRevision() != "" {
+			deviceData["hardwareRevision"] = deviceInfo.GetDeviceHardwareRevision()
+		}
+		if deviceInfo.GetHDRPSoftware() != "" {
+			deviceData["hdrpSoftware"] = deviceInfo.GetHDRPSoftware()
+		}
+		if deviceInfo.GetAndroidRelease() != "" {
+			deviceData["androidRelease"] = deviceInfo.GetAndroidRelease()
+		}
+		if deviceInfo.GetSoftwareDate() != 0 {
+			deviceData["softwareDate"] = deviceInfo.GetSoftwareDate()
+		}
+		if deviceInfo.GetApplication() != "" {
+			deviceData["application"] = deviceInfo.GetApplication()
+		}
+		if deviceInfo.GetAppVersion() != "" {
+			deviceData["appVersion"] = deviceInfo.GetAppVersion()
+		}
+
+		// Add exposure info if available
+		if deviceInfo.GetExposureTimeInfo() != nil {
+			expInfo := deviceInfo.GetExposureTimeInfo()
+			if expInfo.GetExposureTimeMin() != 0 {
+				deviceData["exposureTimeMin"] = expInfo.GetExposureTimeMin()
+			}
+			if expInfo.GetExposureTimeMax() != 0 {
+				deviceData["exposureTimeMax"] = expInfo.GetExposureTimeMax()
+			}
+		}
+
+		// Add ISO info if available
+		if deviceInfo.GetIsoInfo() != nil {
+			isoInfo := deviceInfo.GetIsoInfo()
+			if isoInfo.GetIsoMin() != 0 {
+				deviceData["isoMin"] = isoInfo.GetIsoMin()
+			}
+			if isoInfo.GetIsoMax() != 0 {
+				deviceData["isoMax"] = isoInfo.GetIsoMax()
+			}
+		}
+
+		if deviceInfo.GetMaxAnalogISO() != 0 {
+			deviceData["maxAnalogIso"] = deviceInfo.GetMaxAnalogISO()
+		}
+
+		if len(deviceData) > 0 {
+			parsed["deviceInfo"] = deviceData
+		}
+	}
+
+	return MakerNoteData{
+		Raw:          rawData,
+		Manufacturer: "Google HDR+",
+		Parsed:       parsed,
+	}
 }
 
 func main() {
