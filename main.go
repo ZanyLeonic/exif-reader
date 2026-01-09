@@ -9,6 +9,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ZanyLeonic/exif-reader/pb"
+	"google.golang.org/protobuf/proto"
 )
 
 func findAPP1Segment(data []byte) (int, error) {
@@ -125,81 +128,34 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		}
 	}
 
+	// Photo doesn't need extra processing for MakerNote
+	if !strings.HasPrefix(metadata.Processing.Software, "HDR+") {
+		return &metadata, nil
+	}
+
 	output, err := extractXMPData(data)
 	if err != nil {
 		slog.Error("Error extracting XMP metadata", "error", err)
-		os.Exit(1)
+		return &metadata, err
 	}
 
 	slog.Info("Found XMP data", "xmp", output)
-	xmp := helper.DecodeGoogleHDRPNotes([]byte(output))
+	xmp := helper.DecodeXMPMeta([]byte(output))
+
+	if xmp.RDF.Description.HasExtendedXMP == "" {
+		return &metadata, nil
+	}
 
 	output, err = extractExtXMPData(data, xmp.RDF.Description.HasExtendedXMP)
 	if err != nil {
 		slog.Error("Error extracting XMP metadata", "error", err)
-		os.Exit(1)
+		return &metadata, err
 	}
 
-	// slog.Info("Found Extended XMP data", "xmp", output)
-	os.WriteFile("extracted_extended_xmp.xml", []byte(output), 0644)
-	extXmp := helper.DecodeGoogleHDRPNotes([]byte(output))
+	extXmp := helper.DecodeXMPMeta([]byte(output))
+	cleanBase64 := sanitizeBase64String(extXmp.RDF.Description.HdrPlusMakerNote)
 
-	// Sanitize the base64 string to remove invalid characters
-	rawBase64 := extXmp.RDF.Description.HdrPlusMakerNote
-	os.WriteFile("base64_from_xml.txt", []byte(rawBase64), 0644)
-
-	// Debug: Detailed inspection around position 67284 to find control characters
-	if len(rawBase64) > 67300 {
-		start := 67270
-		end := 67310
-		if end > len(rawBase64) {
-			end = len(rawBase64)
-		}
-
-		// Write detailed analysis to file
-		var debugOutput strings.Builder
-		debugOutput.WriteString(fmt.Sprintf("Analyzing positions %d to %d\n\n", start, end))
-
-		// Scan for any non-base64 characters in this region
-		var problemChars []string
-		for i := start; i < end; i++ {
-			b := rawBase64[i]
-			isValid := (b >= 'A' && b <= 'Z') ||
-				(b >= 'a' && b <= 'z') ||
-				(b >= '0' && b <= '9') ||
-				b == '+' || b == '/' || b == '='
-
-			if !isValid {
-				problemChars = append(problemChars,
-					fmt.Sprintf("pos=%d char=0x%02X(%d)", i, b, b))
-				debugOutput.WriteString(fmt.Sprintf("INVALID at position %d: byte=0x%02X (%d)\n", i, b, b))
-			}
-		}
-
-		if len(problemChars) > 0 {
-			debugOutput.WriteString(fmt.Sprintf("\nTotal invalid chars found: %d\n", len(problemChars)))
-			debugOutput.WriteString("Details: " + strings.Join(problemChars, ", ") + "\n\n")
-		}
-
-		// Show hex dump
-		snippet := rawBase64[start:end]
-		debugOutput.WriteString("Hex dump:\n")
-		for i, b := range []byte(snippet) {
-			if i > 0 && i%16 == 0 {
-				debugOutput.WriteString("\n")
-			}
-			debugOutput.WriteString(fmt.Sprintf("%02X ", b))
-		}
-		debugOutput.WriteString("\n")
-
-		os.WriteFile("debug_base64_region.txt", []byte(debugOutput.String()), 0644)
-		slog.Info("Wrote debug analysis to debug_base64_region.txt")
-	}
-
-	cleanBase64 := sanitizeBase64String(rawBase64)
-	os.WriteFile("base64_cleaned.txt", []byte(cleanBase64), 0644)
-
-	slog.Info("Base64 lengths", "raw", len(rawBase64), "cleaned", len(cleanBase64))
+	slog.Debug("Base64 lengths", "raw", len(extXmp.RDF.Description.HdrPlusMakerNote), "cleaned", len(cleanBase64))
 
 	// Try standard encoding first
 	encrypted, err := base64.StdEncoding.DecodeString(cleanBase64)
@@ -209,21 +165,21 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		encrypted, err = base64.RawStdEncoding.DecodeString(cleanBase64)
 		if err != nil {
 			slog.Error("Failed to decode HDRPlusMakerNote with both encodings", "error", err, "cleanedLength", len(cleanBase64))
-			os.Exit(1)
+			return &metadata, err
 		}
 	}
 
 	if string(encrypted[0:4]) == "HDRP" {
-		slog.Info("Found HDRPlus header")
+		slog.Info("Found Google's HDRPlus header")
 
 		decrypted, err := decryptHDRPBytes(encrypted[5:])
 		if err != nil {
-			return nil, err
+			return &metadata, err
 		}
 
 		protoBytes, err := readGzipContent(decrypted)
 		if err != nil {
-			return nil, err
+			return &metadata, err
 		}
 
 		// Try to parse the protobuf, even if truncated
@@ -243,8 +199,6 @@ func extractExifData(data []byte) (*PhotoExifEvidence, error) {
 		// Populate the MakerNote data in the metadata struct
 		metadata.Image.MakersNote = convertHDRPlusToMakerNote(&hdrPlusNotes, encrypted)
 	}
-
-	slog.Info("Unmarshalled ExtXMP", "extXMP", extXmp)
 
 	return &metadata, nil
 }
@@ -596,7 +550,6 @@ func extractExtXMPData(data []byte, extId string) (string, error) {
 func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte) MakerNoteData {
 	parsed := make(map[string]interface{})
 
-	// Extract ImageInfo fields if available
 	if notes.GetImageInfo() != nil {
 		imageInfo := notes.GetImageInfo()
 		imageData := make(map[string]interface{})
@@ -613,7 +566,6 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 		}
 	}
 
-	// Extract text logs (truncate if too long)
 	if notes.GetTimeLogText() != "" {
 		timeLog := notes.GetTimeLogText()
 		parsed["timeLogText"] = timeLog
@@ -624,13 +576,11 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 		parsed["summaryText"] = summary
 	}
 
-	// Extract FrameInfo
 	if notes.GetFrameCount() != nil {
 		frameInfo := notes.GetFrameCount()
 		parsed["frameCount"] = frameInfo.GetFrameCount()
 	}
 
-	// Extract DeviceInfo
 	if notes.GetDeviceInfo() != nil {
 		deviceInfo := notes.GetDeviceInfo()
 		deviceData := make(map[string]interface{})
@@ -663,7 +613,6 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 			deviceData["appVersion"] = deviceInfo.GetAppVersion()
 		}
 
-		// Add exposure info if available
 		if deviceInfo.GetExposureTimeInfo() != nil {
 			expInfo := deviceInfo.GetExposureTimeInfo()
 			if expInfo.GetExposureTimeMin() != 0 {
@@ -674,7 +623,6 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 			}
 		}
 
-		// Add ISO info if available
 		if deviceInfo.GetIsoInfo() != nil {
 			isoInfo := deviceInfo.GetIsoInfo()
 			if isoInfo.GetIsoMin() != 0 {
@@ -702,14 +650,16 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 }
 
 func main() {
-	data, err := os.ReadFile("pixel2.jpg")
+	data, err := os.ReadFile("pixel3.jpg")
 	if err != nil {
 		slog.Error("Error reading file", "error", err)
 		os.Exit(1)
 	}
 
 	metadata, err := extractExifData(data)
-	if err != nil {
+	if metadata != nil && err != nil {
+		slog.Warn("Extracted metadata with warnings", "warning", err)
+	} else if err != nil {
 		slog.Error("Error extracting exif metadata", "error", err)
 		os.Exit(1)
 	}

@@ -455,7 +455,7 @@ func (e *ExifValueExtractor) DecodeMakerNote(entry IFDEntry) MakerNoteData {
 	return MakerNoteData{}
 }
 
-func (e *ExifValueExtractor) DecodeGoogleHDRPNotes(inXml []byte) XmpMeta {
+func (e *ExifValueExtractor) DecodeXMPMeta(inXml []byte) XmpMeta {
 	var xmp XmpMeta
 
 	err := xml.Unmarshal(inXml, &xmp)
