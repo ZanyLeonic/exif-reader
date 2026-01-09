@@ -22,7 +22,7 @@ message FrameInfo {
 }
 
 message CreateDateInfo {
-  string create_date = 1;
+  int64 create_date = 1;
 }
 
 message DeviceInfo {
@@ -32,14 +32,14 @@ message DeviceInfo {
   string device_hardware_revision = 4;
   string HDRPSoftware = 6;
   string AndroidRelease = 7;
-  string SoftwareDate = 8;
+  int64 SoftwareDate = 8;
   string Application = 9;
   string AppVersion = 10;
 
   ExposureTimeInfo exposure_time_info = 12;
   ISOInfo iso_info = 13;
 
-  int32 MaxAnalogISO = 14;
+  float MaxAnalogISO = 14;
 }
 
 message ExposureTimeInfo {
@@ -48,6 +48,6 @@ message ExposureTimeInfo {
 }
 
 message ISOInfo {
-  int32 iso_min = 1;
-  int32 iso_max = 2;
+  float iso_min = 1;
+  float iso_max = 2;
 }
