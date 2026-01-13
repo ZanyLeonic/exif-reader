@@ -220,7 +220,7 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 			num, den := helper.GetRationalParts(entry, 0)
 			metadata.Camera.ExposureTime = formatExposureTime(num, den)
 		case FNumber:
-			metadata.Camera.FNumber = helper.GetRational(entry, 0)
+			metadata.Camera.FNumber = helper.GetRational(entry, 0, false)
 		case ExposureProgram:
 			metadata.Camera.ExposureProgram = parseExposureProgram(helper.GetUint16(entryOffset))
 		case ISO:
@@ -261,9 +261,10 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 		case FlashFired:
 			metadata.Camera.FlashFired = parseFlashValue(helper.GetUint16(entryOffset))
 		case FocalLength:
-			metadata.Camera.FocalLength = helper.GetRational(entry, 0)
+			metadata.Camera.FocalLength = helper.GetRational(entry, 0, false)
 		case MakerNote:
-		case 0xea1c:
+			//makerIfdPointer := helper.GetUint32(entryOffset)
+			//makerifdOffset := tiffStart + int(exifSubIfdPointer)
 			metadata.Image.MakersNote = helper.DecodeMakerNote(entry)
 		case UserComment:
 			metadata.Authorship.UserComment = helper.GetUserComment(entry, entryOffset)
@@ -295,7 +296,7 @@ func extractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *E
 		case WhiteBalance:
 			metadata.Camera.WhiteBalance = helper.GetString(entry, entryOffset)
 		case DigitalZoomRatio:
-			metadata.Processing.DigitalZoomRatio = helper.GetRational(entry, 0)
+			metadata.Processing.DigitalZoomRatio = helper.GetRational(entry, 0, false)
 		case SceneCaptureType:
 			metadata.Camera.SceneCaptureType = parseSceneType(helper.GetUint16(entryOffset))
 		case Contrast:
@@ -371,21 +372,21 @@ func extractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ExifV
 				underSeaLevel = true
 			}
 		case Altitude:
-			metadata.GPS.Altitude = helper.GetRational(entry, 0)
+			metadata.GPS.Altitude = helper.GetRational(entry, 0, false)
 		case Timestamp:
-			hours = int(helper.GetRational(entry, 0))
-			minutes = int(helper.GetRational(entry, 8))
-			seconds = helper.GetRational(entry, 16)
+			hours = int(helper.GetRational(entry, 0, false))
+			minutes = int(helper.GetRational(entry, 8, false))
+			seconds = helper.GetRational(entry, 16, false)
 			hasTime = true
 		case SpeedRef:
 			speedMetric = helper.GetString(entry, entryOffset)
 			hasSpeed = true
 		case Speed:
-			speed = helper.GetRational(entry, 0)
+			speed = helper.GetRational(entry, 0, false)
 		case ImgDirectionRef:
 			imgDirRef = helper.GetString(entry, entryOffset)
 		case ImgDirection:
-			imgDir = helper.GetRational(entry, 0)
+			imgDir = helper.GetRational(entry, 0, false)
 			hasImgDir = true
 		case MapDatum:
 			metadata.GPS.MapDatum = helper.GetString(entry, entryOffset)
@@ -402,12 +403,12 @@ func extractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ExifV
 		case DestBearingRef:
 			destBearingRef = helper.GetString(entry, entryOffset)
 		case DestBearing:
-			destBearing = helper.GetRational(entry, 0)
+			destBearing = helper.GetRational(entry, 0, false)
 			hasDestBearing = true
 		case DestDistanceRef:
 			destDistanceRef = helper.GetString(entry, entryOffset)
 		case DestDistance:
-			destDistance = helper.GetRational(entry, 0)
+			destDistance = helper.GetRational(entry, 0, false)
 			hasDestDistance = true
 		case ProcessingMethod:
 			metadata.GPS.ProcessingMethod = helper.GetString(entry, entryOffset)
@@ -650,9 +651,15 @@ func convertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 }
 
 func main() {
-	data, err := os.ReadFile("pixel3.jpg")
+	if len(os.Args) < 2 {
+		slog.Error("Usage: exif-reader <image-file>")
+		os.Exit(1)
+	}
+
+	filename := os.Args[1]
+	data, err := os.ReadFile(filename)
 	if err != nil {
-		slog.Error("Error reading file", "error", err)
+		slog.Error("Error reading file", "error", err, "file", filename)
 		os.Exit(1)
 	}
 

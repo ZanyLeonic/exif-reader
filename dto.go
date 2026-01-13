@@ -272,19 +272,28 @@ func (e *ExifValueExtractor) getString(entryOffset, offset, count int) string {
 }
 
 // getRational extracts a rational value (numerator/denominator) from EXIF data
-func (e *ExifValueExtractor) getRational(offset int) float64 {
+func (e *ExifValueExtractor) getRational(offset int, signed bool) float64 {
 	if offset < 0 || offset+8 > len(e.data) {
 		return 0
 	}
 
-	numerator := e.endian.Uint32(e.data[offset : offset+4])
-	denominator := e.endian.Uint32(e.data[offset+4 : offset+8])
+	var numerator float64
+	var denominator float64
+
+	if signed {
+		numerator = float64(int32(e.endian.Uint32(e.data[offset : offset+4])))
+		denominator = float64(int32(e.endian.Uint32(e.data[offset+4 : offset+8])))
+
+	} else {
+		numerator = float64(e.endian.Uint32(e.data[offset : offset+4]))
+		denominator = float64(e.endian.Uint32(e.data[offset+4 : offset+8]))
+	}
 
 	if denominator == 0 {
 		return 0
 	}
 
-	return float64(numerator) / float64(denominator)
+	return numerator / denominator
 }
 
 // getRationalParts extracts the raw numerator and denominator from EXIF data
@@ -301,9 +310,9 @@ func (e *ExifValueExtractor) getRationalParts(offset int) (uint32, uint32) {
 
 // getGPSCoordinate calculates GPS coordinates from degrees, minutes, seconds
 func (e *ExifValueExtractor) getGPSCoordinate(offset int) float64 {
-	degrees := e.getRational(offset)
-	minutes := e.getRational(offset + 8)
-	seconds := e.getRational(offset + 16)
+	degrees := e.getRational(offset, false)
+	minutes := e.getRational(offset+8, false)
+	seconds := e.getRational(offset+16, false)
 
 	return degrees + (minutes / 60.0) + (seconds / 3600.0)
 }
@@ -340,9 +349,9 @@ func (e *ExifValueExtractor) GetUint8Array(entryOffset, numSlices int) []uint8 {
 	return val
 }
 
-func (e *ExifValueExtractor) GetRational(entry IFDEntry, nestedOffset int) float64 {
+func (e *ExifValueExtractor) GetRational(entry IFDEntry, nestedOffset int, signed bool) float64 {
 	offset := e.tiffStart + int(entry.ValueOffset) + nestedOffset
-	return e.getRational(offset)
+	return e.getRational(offset, signed)
 }
 
 func (e *ExifValueExtractor) GetRationalParts(entry IFDEntry, nestedOffset int) (uint32, uint32) {
