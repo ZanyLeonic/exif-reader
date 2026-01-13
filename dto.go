@@ -459,9 +459,106 @@ func (e *ExifValueExtractor) GetUTF16LEString(entry IFDEntry, entryOffset int) s
 
 func (e *ExifValueExtractor) DecodeMakerNote(entry IFDEntry) MakerNoteData {
 	raw := e.GetByteArray(entry, e.tiffStart+int(entry.ValueOffset))
-	slog.Info("MakerNote ID", "ID", string(raw[0:10]))
+	makerId := strings.TrimRight(string(raw[0:10]), "\x00")
+	slog.Info("MakerNote ID", "makerId", makerId)
 
 	return MakerNoteData{}
+	switch makerId {
+	case "Apple iOS":
+		return e.decodeAppleMakerNote(entry)
+	default:
+		return MakerNoteData{}
+	}
+}
+
+func (e *ExifValueExtractor) decodeAppleMakerNote(entry IFDEntry) MakerNoteData {
+	raw := e.GetByteArray(entry, e.tiffStart+int(entry.ValueOffset))
+
+	if len(raw) < 22 {
+		slog.Warn("Apple MakerNote data too short", "length", len(raw), "minimum", 22)
+		return MakerNoteData{Raw: raw}
+	}
+
+	if string(raw[0:12]) != "Apple iOS\x00\x00\x01" {
+		slog.Warn("Apple MakerNote prefix mismatch", "prefix", fmt.Sprintf("%q", raw[0:12]))
+		return MakerNoteData{Raw: raw}
+	}
+	// Apple MakerNote uses TIFF structure starting at byte 12
+	// Parse the TIFF header using the standard function
+	mnEndian, err := determineEndianess(raw, 2)
+	if err != nil {
+		slog.Warn("Error parsing Apple MakerNote TIFF header", "err", err)
+		return MakerNoteData{Raw: raw}
+	}
+	// Unlike standard TIFF, there's no magic number or IFD offset pointer.
+	// The IFD just starts at byte 14.
+	// Offsets within IFD entries are relative to byte 0 (start of MakerNote data)
+
+	mnTiffStart := 0 // Offsets are relative to byte 0 of MakerNote
+	mnFirstIfd := 14 // IFD starts at byte 14
+
+	slog.Info("Apple MakerNote IFD location",
+		"ifdPosition", mnFirstIfd)
+
+	if mnFirstIfd+2 > len(raw) {
+		slog.Warn("IFD position out of bounds",
+			"ifdPos", mnFirstIfd,
+			"dataLen", len(raw))
+		return MakerNoteData{Raw: raw}
+	}
+
+	// Read entry count
+	entryCount := mnEndian.Uint16(raw[mnFirstIfd : mnFirstIfd+2])
+	// Validate we have enough data for all entries
+	entriesStart := mnFirstIfd + 2
+	totalEntriesSize := int(entryCount) * 12
+	if entriesStart+totalEntriesSize > len(raw) {
+		slog.Warn("Not enough data for all MakerNote entries",
+			"entryCount", entryCount,
+			"entriesStart", entriesStart,
+			"requiredBytes", totalEntriesSize,
+			"availableBytes", len(raw)-entriesStart)
+		// Adjust entry count to what we can actually read
+		entryCount = uint16((len(raw) - entriesStart) / 12)
+		slog.Info("Adjusted entry count to fit available data", "newCount", entryCount)
+	}
+
+	slog.Info("Apple MakerNote IFD parsed",
+		"entryCount", entryCount,
+		"entriesStart", entriesStart)
+
+	// Create helper for MakerNote parsing
+	mnHelper := ExifValueExtractor{
+		data:      raw,
+		tiffStart: mnTiffStart,
+		endian:    mnEndian,
+	}
+
+	parsed := make(map[string]interface{})
+
+	// Parse all entries
+	for j := 0; j < int(entryCount); j++ {
+		entryOffset := entriesStart + (j * 12)
+
+		entry := parseIFDEntry(raw, entryOffset, mnEndian)
+
+		slog.Info("Apple MakerNote entry",
+			"index", j,
+			"tag", fmt.Sprintf("0x%04x", entry.Tag),
+			"type", entry.DataType,
+			"count", entry.Count,
+			"valueOffset", entry.ValueOffset)
+
+		// Parse known tags
+		switch entry.Tag {
+		}
+	}
+
+	return MakerNoteData{
+		Raw:          raw,
+		Manufacturer: "Apple",
+		Parsed:       parsed,
+	}
 }
 
 func (e *ExifValueExtractor) DecodeXMPMeta(inXml []byte) XmpMeta {
