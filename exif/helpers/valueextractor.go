@@ -1,4 +1,4 @@
-package exif
+package helpers
 
 import (
 	"encoding/binary"

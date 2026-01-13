@@ -4,37 +4,39 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/ZanyLeonic/exif-reader/exif/helpers"
 )
 
 // GPS Sub-IFD Tags
 const (
-	GPSVersionID     Tag = 0x0
-	LatitudeRef      Tag = 0x1
-	Latitude         Tag = 0x2
-	LongitudeRef     Tag = 0x3
-	Longitude        Tag = 0x4
-	AltitudeRef      Tag = 0x5
-	Altitude         Tag = 0x6
-	Timestamp        Tag = 0x7
-	SpeedRef         Tag = 0x0c
-	Speed            Tag = 0x0d
-	ImgDirectionRef  Tag = 0x10
-	ImgDirection     Tag = 0x11
-	MapDatum         Tag = 0x12
-	DestLatitudeRef  Tag = 0x13
-	DestLatitude     Tag = 0x14
-	DestLongitudeRef Tag = 0x15
-	DestLongitude    Tag = 0x16
-	DestBearingRef   Tag = 0x17
-	DestBearing      Tag = 0x18
-	DestDistanceRef  Tag = 0x19
-	DestDistance     Tag = 0x1a
-	ProcessingMethod Tag = 0x1b
-	Datestamp        Tag = 0x1d
-	Differential     Tag = 0x1e
+	GPSVersionID     helpers.Tag = 0x0
+	LatitudeRef      helpers.Tag = 0x1
+	Latitude         helpers.Tag = 0x2
+	LongitudeRef     helpers.Tag = 0x3
+	Longitude        helpers.Tag = 0x4
+	AltitudeRef      helpers.Tag = 0x5
+	Altitude         helpers.Tag = 0x6
+	Timestamp        helpers.Tag = 0x7
+	SpeedRef         helpers.Tag = 0x0c
+	Speed            helpers.Tag = 0x0d
+	ImgDirectionRef  helpers.Tag = 0x10
+	ImgDirection     helpers.Tag = 0x11
+	MapDatum         helpers.Tag = 0x12
+	DestLatitudeRef  helpers.Tag = 0x13
+	DestLatitude     helpers.Tag = 0x14
+	DestLongitudeRef helpers.Tag = 0x15
+	DestLongitude    helpers.Tag = 0x16
+	DestBearingRef   helpers.Tag = 0x17
+	DestBearing      helpers.Tag = 0x18
+	DestDistanceRef  helpers.Tag = 0x19
+	DestDistance     helpers.Tag = 0x1a
+	ProcessingMethod helpers.Tag = 0x1b
+	Datestamp        helpers.Tag = 0x1d
+	Differential     helpers.Tag = 0x1e
 )
 
-func ExtractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ValueExtractor) {
+func ExtractGPSIFD(exifIfdOffset int, metadata *helpers.PhotoExifEvidence, helper *helpers.ValueExtractor) {
 	entryCount := helper.Endian.Uint16(helper.Data[exifIfdOffset : exifIfdOffset+2])
 
 	var hours, minutes int
@@ -44,7 +46,7 @@ func ExtractGPSIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *Value
 
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := exifIfdOffset + 2 + (j * 12)
-		entry := parseIFDEntry(helper.Data, entryOffset, helper.Endian)
+		entry := helpers.ParseIFDEntry(helper.Data, entryOffset, helper.Endian)
 
 		slog.Info("GPS IFD Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),

@@ -1,7 +1,8 @@
-package exif
+package helpers
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,18 +61,17 @@ type DeviceData struct {
 
 // ImageProperties Image dimensions and properties
 type ImageProperties struct {
-	Width            int           `json:"width"`
-	Height           int           `json:"height"`
-	PixelXDimension  float64       `json:"pixelXDimension"`
-	PixelYDimension  float64       `json:"pixelYDimension"`
-	Orientation      string        `json:"orientation"`
-	ColorSpace       string        `json:"colorSpace"`
-	ComponentsConfig string        `json:"componentsConfiguration"`
-	FileSource       string        `json:"fileSource"`
-	SceneType        string        `json:"sceneType"`
-	ExifVersion      string        `json:"exifVersion"`
-	FlashpixVersion  string        `json:"flashpixVersion"`
-	MakersNote       MakerNoteData `json:"makersNote"`
+	Width            int     `json:"width"`
+	Height           int     `json:"height"`
+	PixelXDimension  float64 `json:"pixelXDimension"`
+	PixelYDimension  float64 `json:"pixelYDimension"`
+	Orientation      string  `json:"orientation"`
+	ColorSpace       string  `json:"colorSpace"`
+	ComponentsConfig string  `json:"componentsConfiguration"`
+	FileSource       string  `json:"fileSource"`
+	SceneType        string  `json:"sceneType"`
+	ExifVersion      string  `json:"exifVersion"`
+	FlashpixVersion  string  `json:"flashpixVersion"`
 }
 
 // CameraSettings Camera settings used during capture
@@ -117,9 +117,9 @@ type AuthorshipData struct {
 
 // AuthenticityData Authenticity and integrity markers
 type AuthenticityData struct {
-	ImageUniqueID    string `json:"imageUniqueID"`
-	MakerNote        string `json:"makerNote"`
-	RelatedSoundFile string `json:"relatedSoundFile"`
+	ImageUniqueID    string        `json:"imageUniqueID"`
+	MakerNote        MakerNoteData `json:"makerNote"`
+	RelatedSoundFile string        `json:"relatedSoundFile"`
 }
 
 type PhotoExifEvidence struct {
@@ -140,7 +140,16 @@ type IFDEntry struct {
 	ValueOffset uint32
 }
 
-func parseIFDEntry(data []byte, offset int, endian binary.ByteOrder) IFDEntry {
+func DetermineEndianess(data []byte, offset int) (binary.ByteOrder, error) {
+	if data[offset+10] == 0x49 && data[offset+11] == 0x49 {
+		return binary.LittleEndian, nil
+	} else if data[offset+10] == 0x4D && data[offset+11] == 0x4D {
+		return binary.BigEndian, nil
+	}
+	return nil, errors.New("unsupported byte order")
+}
+
+func ParseIFDEntry(data []byte, offset int, endian binary.ByteOrder) IFDEntry {
 	return IFDEntry{
 		Tag:         Tag(endian.Uint16(data[offset : offset+2])),
 		DataType:    endian.Uint16(data[offset+2 : offset+4]),
@@ -149,7 +158,7 @@ func parseIFDEntry(data []byte, offset int, endian binary.ByteOrder) IFDEntry {
 	}
 }
 
-func parseOrientationValue(raw uint16) string {
+func ParseOrientationValue(raw uint16) string {
 	switch raw {
 	case 1:
 		return "Horizontal"
@@ -172,7 +181,7 @@ func parseOrientationValue(raw uint16) string {
 	}
 }
 
-func parseExposureProgram(raw uint16) string {
+func ParseExposureProgram(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Not Defined"
@@ -199,7 +208,7 @@ func parseExposureProgram(raw uint16) string {
 	}
 }
 
-func parseComponentsConfiguration(components []uint8) string {
+func ParseComponentsConfiguration(components []uint8) string {
 	var names []string
 	for _, comp := range components {
 		switch comp {
@@ -224,7 +233,7 @@ func parseComponentsConfiguration(components []uint8) string {
 	return strings.Join(names, "")
 }
 
-func parseMeteringMode(raw uint16) string {
+func ParseMeteringMode(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Unknown"
@@ -247,7 +256,7 @@ func parseMeteringMode(raw uint16) string {
 	}
 }
 
-func parseLightSource(raw uint16) string {
+func ParseLightSource(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Unknown"
@@ -298,7 +307,7 @@ func parseLightSource(raw uint16) string {
 	}
 }
 
-func parseColourSpace(raw uint16) string {
+func ParseColourSpace(raw uint16) string {
 	switch raw {
 	case 0x1:
 		return "sRGB"
@@ -315,7 +324,7 @@ func parseColourSpace(raw uint16) string {
 	}
 }
 
-func parseFlashValue(raw uint16) string {
+func ParseFlashValue(raw uint16) string {
 	switch raw {
 	case 0x0:
 		return "No Flash"
@@ -376,7 +385,7 @@ func parseFlashValue(raw uint16) string {
 	}
 }
 
-func formatExposureTime(num, den uint32) string {
+func FormatExposureTime(num, den uint32) string {
 	if den == 0 {
 		return "Invalid"
 	}
@@ -395,7 +404,7 @@ func formatExposureTime(num, den uint32) string {
 	return fmt.Sprintf("1/%d", reciprocal)
 }
 
-func parseFileSource(raw uint8) string {
+func ParseFileSource(raw uint8) string {
 	switch raw {
 	case 0x1:
 		return "Film Scanner (Transparent Scanner)"
@@ -408,7 +417,7 @@ func parseFileSource(raw uint8) string {
 	}
 }
 
-func parseSceneType(raw uint16) string {
+func ParseSceneType(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Standard"
@@ -425,8 +434,8 @@ func parseSceneType(raw uint16) string {
 	}
 }
 
-// parseProcessing for Contrast, Saturation, and Sharpness
-func parseProcessing(raw uint16) string {
+// ParseProcessing for Contrast, Saturation, and Sharpness
+func ParseProcessing(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Normal"
@@ -439,7 +448,7 @@ func parseProcessing(raw uint16) string {
 	}
 }
 
-func parseSubjectDistanceRange(raw uint16) string {
+func ParseSubjectDistanceRange(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Unknown"
@@ -454,7 +463,7 @@ func parseSubjectDistanceRange(raw uint16) string {
 	}
 }
 
-func parseCompositeImage(raw uint16) string {
+func ParseCompositeImage(raw uint16) string {
 	switch raw {
 	case 0:
 		return "Unknown"

@@ -1,4 +1,4 @@
-package exif
+package makernotes
 
 import (
 	"bytes"
@@ -10,11 +10,12 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/ZanyLeonic/exif-reader/exif/helpers"
 	"github.com/ZanyLeonic/exif-reader/pb"
 )
 
 // ConvertHDRPlusToMakerNote converts a GoogleHDRPlusMakerNote protobuf to MakerNoteData
-func ConvertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte) MakerNoteData {
+func ConvertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte) helpers.MakerNoteData {
 	parsed := make(map[string]interface{})
 
 	if notes.GetImageInfo() != nil {
@@ -109,7 +110,7 @@ func ConvertHDRPlusToMakerNote(notes *pb.GoogleHDRPlusMakerNote, rawData []byte)
 		}
 	}
 
-	return MakerNoteData{
+	return helpers.MakerNoteData{
 		Raw:          rawData,
 		Manufacturer: "Google HDR+",
 		Parsed:       parsed,

@@ -4,62 +4,65 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/ZanyLeonic/exif-reader/exif/helpers"
+	"github.com/ZanyLeonic/exif-reader/exif/makernotes"
 )
 
 // EXIF Sub-IFD Tags
 const (
-	ExposureTime            Tag = 0x829a
-	FNumber                 Tag = 0x829d
-	ExposureProgram         Tag = 0x8822
-	ISO                     Tag = 0x8827
-	ExifVersion             Tag = 0x9000
-	DateCaptured            Tag = 0x9003
-	CreateDate              Tag = 0x9004
-	OffsetTime              Tag = 0x9010
-	OffsetTimeOriginal      Tag = 0x9011
-	OffsetTimeDigitized     Tag = 0x9012
-	ComponentsConfiguration Tag = 0x9101
-	MeteringMode            Tag = 0x9207
-	LightSource             Tag = 0x9208
-	FlashFired              Tag = 0x9209
-	FocalLength             Tag = 0x920a
-	MakerNote               Tag = 0x927c
-	UserComment             Tag = 0x9286
-	SubSecTime              Tag = 0x9290
-	SubSecTimeOriginal      Tag = 0x9291
-	SubSecTimeDigitized     Tag = 0x9292
-	FlashpixVersion         Tag = 0xa000
-	ColorSpace              Tag = 0xa001
-	PixelXDimension         Tag = 0xa002
-	PixelYDimension         Tag = 0xa003
-	RelatedSoundFile        Tag = 0xa004
-	FileSource              Tag = 0xa300
-	SceneType               Tag = 0xa301
-	WhiteBalance            Tag = 0xa403
-	DigitalZoomRatio        Tag = 0xa404
-	SceneCaptureType        Tag = 0xa406
-	Contrast                Tag = 0xa408
-	Saturation              Tag = 0xa409
-	Sharpness               Tag = 0xa40a
-	SubjectDistanceRange    Tag = 0xa40c
-	ImageUniqueID           Tag = 0xa420
-	BodySerialNumber        Tag = 0xa431
-	LensInfo                Tag = 0xa432
-	LensMake                Tag = 0xa433
-	LensModel               Tag = 0xa434
-	LensSerialNumber        Tag = 0xa435
-	ImageEditor             Tag = 0xa438
-	CameraFirmware          Tag = 0xa439
-	CompositeImage          Tag = 0xa460
-	CompositeImageCount     Tag = 0xa461
-	SerialNumber            Tag = 0xfde9
+	ExposureTime            helpers.Tag = 0x829a
+	FNumber                 helpers.Tag = 0x829d
+	ExposureProgram         helpers.Tag = 0x8822
+	ISO                     helpers.Tag = 0x8827
+	ExifVersion             helpers.Tag = 0x9000
+	DateCaptured            helpers.Tag = 0x9003
+	CreateDate              helpers.Tag = 0x9004
+	OffsetTime              helpers.Tag = 0x9010
+	OffsetTimeOriginal      helpers.Tag = 0x9011
+	OffsetTimeDigitized     helpers.Tag = 0x9012
+	ComponentsConfiguration helpers.Tag = 0x9101
+	MeteringMode            helpers.Tag = 0x9207
+	LightSource             helpers.Tag = 0x9208
+	FlashFired              helpers.Tag = 0x9209
+	FocalLength             helpers.Tag = 0x920a
+	MakerNote               helpers.Tag = 0x927c
+	UserComment             helpers.Tag = 0x9286
+	SubSecTime              helpers.Tag = 0x9290
+	SubSecTimeOriginal      helpers.Tag = 0x9291
+	SubSecTimeDigitized     helpers.Tag = 0x9292
+	FlashpixVersion         helpers.Tag = 0xa000
+	ColorSpace              helpers.Tag = 0xa001
+	PixelXDimension         helpers.Tag = 0xa002
+	PixelYDimension         helpers.Tag = 0xa003
+	RelatedSoundFile        helpers.Tag = 0xa004
+	FileSource              helpers.Tag = 0xa300
+	SceneType               helpers.Tag = 0xa301
+	WhiteBalance            helpers.Tag = 0xa403
+	DigitalZoomRatio        helpers.Tag = 0xa404
+	SceneCaptureType        helpers.Tag = 0xa406
+	Contrast                helpers.Tag = 0xa408
+	Saturation              helpers.Tag = 0xa409
+	Sharpness               helpers.Tag = 0xa40a
+	SubjectDistanceRange    helpers.Tag = 0xa40c
+	ImageUniqueID           helpers.Tag = 0xa420
+	BodySerialNumber        helpers.Tag = 0xa431
+	LensInfo                helpers.Tag = 0xa432
+	LensMake                helpers.Tag = 0xa433
+	LensModel               helpers.Tag = 0xa434
+	LensSerialNumber        helpers.Tag = 0xa435
+	ImageEditor             helpers.Tag = 0xa438
+	CameraFirmware          helpers.Tag = 0xa439
+	CompositeImage          helpers.Tag = 0xa460
+	CompositeImageCount     helpers.Tag = 0xa461
+	SerialNumber            helpers.Tag = 0xfde9
 )
 
-func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *ValueExtractor) {
+func ExtractExifSubIFD(exifIfdOffset int, metadata *helpers.PhotoExifEvidence, helper *helpers.ValueExtractor) {
 	entryCount := helper.Endian.Uint16(helper.Data[exifIfdOffset : exifIfdOffset+2])
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := exifIfdOffset + 2 + (j * 12)
-		entry := parseIFDEntry(helper.Data, entryOffset, helper.Endian)
+		entry := helpers.ParseIFDEntry(helper.Data, entryOffset, helper.Endian)
 
 		slog.Info("ExifIFD Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),
@@ -70,11 +73,11 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		switch entry.Tag {
 		case ExposureTime:
 			num, den := helper.GetRationalParts(entry, 0)
-			metadata.Camera.ExposureTime = formatExposureTime(num, den)
+			metadata.Camera.ExposureTime = helpers.FormatExposureTime(num, den)
 		case FNumber:
 			metadata.Camera.FNumber = helper.GetRational(entry, 0, false)
 		case ExposureProgram:
-			metadata.Camera.ExposureProgram = parseExposureProgram(helper.GetUint16(entryOffset))
+			metadata.Camera.ExposureProgram = helpers.ParseExposureProgram(helper.GetUint16(entryOffset))
 		case ISO:
 			metadata.Camera.ISO = int(helper.GetUint16(entryOffset))
 		case ExifVersion:
@@ -104,18 +107,27 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		case ComponentsConfiguration:
 			if entry.Count == 4 {
 				components := helper.GetUint8Array(entryOffset, 4)
-				metadata.Image.ComponentsConfig = parseComponentsConfiguration(components)
+				metadata.Image.ComponentsConfig = helpers.ParseComponentsConfiguration(components)
 			}
 		case MeteringMode:
-			metadata.Camera.MeteringMode = parseMeteringMode(helper.GetUint16(entryOffset))
+			metadata.Camera.MeteringMode = helpers.ParseMeteringMode(helper.GetUint16(entryOffset))
 		case LightSource:
-			metadata.Camera.LightSource = parseLightSource(helper.GetUint16(entryOffset))
+			metadata.Camera.LightSource = helpers.ParseLightSource(helper.GetUint16(entryOffset))
 		case FlashFired:
-			metadata.Camera.FlashFired = parseFlashValue(helper.GetUint16(entryOffset))
+			metadata.Camera.FlashFired = helpers.ParseFlashValue(helper.GetUint16(entryOffset))
 		case FocalLength:
 			metadata.Camera.FocalLength = helper.GetRational(entry, 0, false)
 		case MakerNote:
-			continue
+			manufacturer, parsed, err := makernotes.DetectAndParse(helper, entry)
+			if err != nil {
+				slog.Warn("Cannot parse MakerNote, skipping", "err", err)
+				continue
+			}
+			metadata.Authenticity.MakerNote = helpers.MakerNoteData{
+				Raw:          helper.GetByteArray(entry, helper.TiffStart+int(entry.ValueOffset)),
+				Manufacturer: manufacturer,
+				Parsed:       *parsed,
+			}
 		case UserComment:
 			metadata.Authorship.UserComment = helper.GetUserComment(entry, entryOffset)
 		case SubSecTime:
@@ -127,7 +139,7 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		case FlashpixVersion:
 			metadata.Image.FlashpixVersion = helper.GetVersion(entry, entryOffset)
 		case ColorSpace:
-			metadata.Image.ColorSpace = parseColourSpace(helper.GetUint16(entryOffset))
+			metadata.Image.ColorSpace = helpers.ParseColourSpace(helper.GetUint16(entryOffset))
 		case PixelXDimension:
 			metadata.Image.PixelXDimension = float64(helper.GetUint16(entryOffset))
 		case PixelYDimension:
@@ -135,7 +147,7 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		case RelatedSoundFile:
 			metadata.Authenticity.RelatedSoundFile = helper.GetString(entry, entryOffset)
 		case FileSource:
-			metadata.Image.FileSource = parseFileSource(helper.GetUint8(entryOffset))
+			metadata.Image.FileSource = helpers.ParseFileSource(helper.GetUint8(entryOffset))
 		case SceneType:
 			rawVal := helper.GetUint8(entryOffset)
 			if rawVal == 0x01 {
@@ -148,15 +160,15 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		case DigitalZoomRatio:
 			metadata.Processing.DigitalZoomRatio = helper.GetRational(entry, 0, false)
 		case SceneCaptureType:
-			metadata.Camera.SceneCaptureType = parseSceneType(helper.GetUint16(entryOffset))
+			metadata.Camera.SceneCaptureType = helpers.ParseSceneType(helper.GetUint16(entryOffset))
 		case Contrast:
-			metadata.Processing.Contrast = parseProcessing(helper.GetUint16(entryOffset))
+			metadata.Processing.Contrast = helpers.ParseProcessing(helper.GetUint16(entryOffset))
 		case Saturation:
-			metadata.Processing.Saturation = parseProcessing(helper.GetUint16(entryOffset))
+			metadata.Processing.Saturation = helpers.ParseProcessing(helper.GetUint16(entryOffset))
 		case Sharpness:
-			metadata.Processing.Sharpness = parseProcessing(helper.GetUint16(entryOffset))
+			metadata.Processing.Sharpness = helpers.ParseProcessing(helper.GetUint16(entryOffset))
 		case SubjectDistanceRange:
-			metadata.Camera.SubjectDistanceRange = parseSubjectDistanceRange(helper.GetUint16(entryOffset))
+			metadata.Camera.SubjectDistanceRange = helpers.ParseSubjectDistanceRange(helper.GetUint16(entryOffset))
 		case ImageUniqueID:
 			metadata.Authenticity.ImageUniqueID = helper.GetString(entry, entryOffset)
 		case BodySerialNumber:
@@ -174,7 +186,7 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *PhotoExifEvidence, helper *V
 		case CameraFirmware:
 			metadata.Device.CameraFirmware = helper.GetString(entry, entryOffset)
 		case CompositeImage:
-			metadata.Processing.CompositeImage = parseCompositeImage(helper.GetUint16(entryOffset))
+			metadata.Processing.CompositeImage = helpers.ParseCompositeImage(helper.GetUint16(entryOffset))
 		case CompositeImageCount:
 			sourceNum, usedNum := helper.GetCompositeImageCount(entry, entryOffset)
 			metadata.Processing.CompositeImageCount = fmt.Sprintf("%d/%d", sourceNum, usedNum)

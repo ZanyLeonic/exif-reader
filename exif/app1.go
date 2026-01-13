@@ -2,37 +2,38 @@ package exif
 
 import (
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/ZanyLeonic/exif-reader/exif/helpers"
+	"github.com/ZanyLeonic/exif-reader/exif/makernotes"
 	"github.com/ZanyLeonic/exif-reader/pb"
 	"google.golang.org/protobuf/proto"
 )
 
 // APP1 IFD Tags
 const (
-	ProcessingSoftware Tag = 0x000b
-	ImageWidth         Tag = 0x0100
-	ImageHeight        Tag = 0x0101
-	ImageDescription   Tag = 0x010e
-	Make               Tag = 0x010f
-	Model              Tag = 0x0110
-	Orientation        Tag = 0x0112
-	Software           Tag = 0x0131
-	ModifyDate         Tag = 0x0132
-	Artist             Tag = 0x013b
-	Copyright          Tag = 0x8298
-	EXIFSubIFD         Tag = 0x8769
-	GPSSubIFD          Tag = 0x8825
-	XPTitle            Tag = 0x9c9b
-	XPComment          Tag = 0x9c9c
-	XPAuthor           Tag = 0x9c9d
-	XPKeywords         Tag = 0x9c9e
-	XPSubject          Tag = 0x9c9f
+	ProcessingSoftware helpers.Tag = 0x000b
+	ImageWidth         helpers.Tag = 0x0100
+	ImageHeight        helpers.Tag = 0x0101
+	ImageDescription   helpers.Tag = 0x010e
+	Make               helpers.Tag = 0x010f
+	Model              helpers.Tag = 0x0110
+	Orientation        helpers.Tag = 0x0112
+	Software           helpers.Tag = 0x0131
+	ModifyDate         helpers.Tag = 0x0132
+	Artist             helpers.Tag = 0x013b
+	Copyright          helpers.Tag = 0x8298
+	EXIFSubIFD         helpers.Tag = 0x8769
+	GPSSubIFD          helpers.Tag = 0x8825
+	XPTitle            helpers.Tag = 0x9c9b
+	XPComment          helpers.Tag = 0x9c9c
+	XPAuthor           helpers.Tag = 0x9c9d
+	XPKeywords         helpers.Tag = 0x9c9e
+	XPSubject          helpers.Tag = 0x9c9f
 )
 
 func findAPP1Segment(data []byte) (int, error) {
@@ -50,23 +51,14 @@ func findAPP1Segment(data []byte) (int, error) {
 	return 0, errors.New("cannot find EXIF block")
 }
 
-func DetermineEndianess(data []byte, offset int) (binary.ByteOrder, error) {
-	if data[offset+10] == 0x49 && data[offset+11] == 0x49 {
-		return binary.LittleEndian, nil
-	} else if data[offset+10] == 0x4D && data[offset+11] == 0x4D {
-		return binary.BigEndian, nil
-	}
-	return nil, errors.New("unsupported byte order")
-}
-
-func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
+func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 	// Determine if we are working with a JPEG with EXIF data
 	offset, err := findAPP1Segment(data)
 	if err != nil {
 		return nil, err
 	}
 
-	endian, err := DetermineEndianess(data, offset)
+	endian, err := helpers.DetermineEndianess(data, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +74,8 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 	entryCount := endian.Uint16(data[firstIfdIndex : firstIfdIndex+2])
 	slog.Info("IFD entry count", "count", entryCount)
 
-	metadata := PhotoExifEvidence{}
-	helper := ValueExtractor{
+	metadata := helpers.PhotoExifEvidence{}
+	helper := helpers.ValueExtractor{
 		Data:      data,
 		TiffStart: tiffStart,
 		Endian:    endian,
@@ -91,7 +83,7 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := firstIfdIndex + 2 + (j * 12)
-		entry := parseIFDEntry(data, entryOffset, endian)
+		entry := helpers.ParseIFDEntry(data, entryOffset, endian)
 
 		slog.Info("IFD01 Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),
@@ -113,7 +105,7 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 		case Model:
 			metadata.Device.Model = helper.GetString(entry, entryOffset)
 		case Orientation:
-			metadata.Image.Orientation = parseOrientationValue(helper.GetUint16(entryOffset))
+			metadata.Image.Orientation = helpers.ParseOrientationValue(helper.GetUint16(entryOffset))
 		case Software:
 			metadata.Processing.Software = helper.GetString(entry, entryOffset)
 		case ModifyDate:
@@ -154,7 +146,7 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 		return &metadata, nil
 	}
 
-	output, err := ExtractXMPData(data)
+	output, err := helpers.ExtractXMPData(data)
 	if err != nil {
 		slog.Error("Error extracting XMP metadata", "error", err)
 		return &metadata, err
@@ -167,14 +159,14 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 		return &metadata, nil
 	}
 
-	output, err = ExtractExtXMPData(data, xmp.RDF.Description.HasExtendedXMP)
+	output, err = helpers.ExtractExtXMPData(data, xmp.RDF.Description.HasExtendedXMP)
 	if err != nil {
 		slog.Error("Error extracting XMP metadata", "error", err)
 		return &metadata, err
 	}
 
 	extXmp := helper.DecodeXMPMeta([]byte(output))
-	cleanBase64 := SanitizeBase64String(extXmp.RDF.Description.HdrPlusMakerNote)
+	cleanBase64 := helpers.SanitizeBase64String(extXmp.RDF.Description.HdrPlusMakerNote)
 
 	slog.Debug("Base64 lengths", "raw", len(extXmp.RDF.Description.HdrPlusMakerNote), "cleaned", len(cleanBase64))
 
@@ -193,12 +185,12 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 	if string(encrypted[0:4]) == "HDRP" {
 		slog.Info("Found Google's HDRPlus header")
 
-		decrypted, err := DecryptHDRPBytes(encrypted[5:])
+		decrypted, err := makernotes.DecryptHDRPBytes(encrypted[5:])
 		if err != nil {
 			return &metadata, err
 		}
 
-		protoBytes, err := ReadGzipContent(decrypted)
+		protoBytes, err := makernotes.ReadGzipContent(decrypted)
 		if err != nil {
 			return &metadata, err
 		}
@@ -218,7 +210,7 @@ func ExtractExifData(data []byte) (*PhotoExifEvidence, error) {
 		}
 
 		// Populate the MakerNote data in the metadata struct
-		metadata.Image.MakersNote = ConvertHDRPlusToMakerNote(&hdrPlusNotes, encrypted)
+		metadata.Authenticity.MakerNote = makernotes.ConvertHDRPlusToMakerNote(&hdrPlusNotes, encrypted)
 	}
 
 	return &metadata, nil

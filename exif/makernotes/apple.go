@@ -1,30 +1,38 @@
-package exif
+package makernotes
 
 import (
 	"fmt"
 	"log/slog"
+
+	"github.com/ZanyLeonic/exif-reader/exif/helpers"
 )
 
-func DecodeAppleMakerNote(e *ValueExtractor, entry IFDEntry) MakerNoteData {
+type AppleParser struct{}
+
+func (p *AppleParser) Manufacturer() string {
+	return "Apple"
+}
+
+func (p *AppleParser) Parse(e *helpers.ValueExtractor, entry helpers.IFDEntry) (*map[string]interface{}, error) {
 	raw := e.GetByteArray(entry, e.TiffStart+int(entry.ValueOffset))
 
 	// Minimum size check: 12-byte prefix + 2 endian + 2 magic + 4 offset + 2 count = 22 bytes
 	if len(raw) < 22 {
 		slog.Warn("Apple MakerNote data too short", "length", len(raw), "minimum", 22)
-		return MakerNoteData{Raw: raw}
+		return nil, fmt.Errorf("apple makernote too short length: %d, minimum: 22", len(raw))
 	}
 
 	if string(raw[0:12]) != "Apple iOS\x00\x00\x01" {
 		slog.Warn("Apple MakerNote prefix mismatch", "prefix", fmt.Sprintf("%q", raw[0:12]))
-		return MakerNoteData{Raw: raw}
+		return nil, fmt.Errorf("incorrect prefix, expected Apple iOS, got: %s", fmt.Sprintf("%q", raw[0:12]))
 	}
 
 	// Apple MakerNote uses TIFF structure starting at byte 12
 	// Parse the TIFF header using the standard function
-	mnEndian, err := DetermineEndianess(raw, 2)
+	mnEndian, err := helpers.DetermineEndianess(raw, 2)
 	if err != nil {
 		slog.Warn("Error parsing Apple MakerNote TIFF header", "err", err)
-		return MakerNoteData{Raw: raw}
+		return nil, err
 	}
 
 	// Unlike standard TIFF, there's no magic number or IFD offset pointer.
@@ -41,7 +49,7 @@ func DecodeAppleMakerNote(e *ValueExtractor, entry IFDEntry) MakerNoteData {
 		slog.Warn("IFD position out of bounds",
 			"ifdPos", mnFirstIfd,
 			"dataLen", len(raw))
-		return MakerNoteData{Raw: raw}
+		return nil, fmt.Errorf("IFD position out of bounds, pos: %d, dataLength: %d", mnFirstIfd, len(raw))
 	}
 
 	entryCount := mnEndian.Uint16(raw[mnFirstIfd : mnFirstIfd+2])
@@ -65,7 +73,7 @@ func DecodeAppleMakerNote(e *ValueExtractor, entry IFDEntry) MakerNoteData {
 		"entriesStart", entriesStart)
 
 	// Create helper for MakerNote parsing
-	mnHelper := ValueExtractor{
+	mnHelper := helpers.ValueExtractor{
 		Data:      raw,
 		TiffStart: mnTiffStart,
 		Endian:    mnEndian,
@@ -77,7 +85,7 @@ func DecodeAppleMakerNote(e *ValueExtractor, entry IFDEntry) MakerNoteData {
 	for j := 0; j < int(entryCount); j++ {
 		entryOffset := entriesStart + (j * 12)
 
-		entry := parseIFDEntry(raw, entryOffset, mnEndian)
+		entry := helpers.ParseIFDEntry(raw, entryOffset, mnEndian)
 
 		slog.Info("Apple MakerNote entry",
 			"index", j,
@@ -199,9 +207,5 @@ func DecodeAppleMakerNote(e *ValueExtractor, entry IFDEntry) MakerNoteData {
 		}
 	}
 
-	return MakerNoteData{
-		Raw:          raw,
-		Manufacturer: "Apple",
-		Parsed:       parsed,
-	}
+	return &parsed, nil
 }
