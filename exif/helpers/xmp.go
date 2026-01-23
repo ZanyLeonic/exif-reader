@@ -215,7 +215,7 @@ func SanitizeBase64String(s string) string {
 			countSummary = append(countSummary, fmt.Sprintf("%s:%d", name, count))
 		}
 
-		slog.Info("Removed invalid characters from base64",
+		slog.Debug("Removed invalid characters from base64",
 			"totalRemoved", len(removedChars),
 			"first10", strings.Join(charDetails, ", "),
 			"summary", strings.Join(countSummary, ", "))
@@ -231,7 +231,7 @@ func SanitizeBase64String(s string) string {
 	mod := len(cleaned) % 4
 	if mod > 0 {
 		paddingNeeded := 4 - mod
-		slog.Info("Fixing base64 padding",
+		slog.Debug("Fixing base64 padding",
 			"originalLength", len(cleaned),
 			"mod4", mod,
 			"paddingAdded", paddingNeeded)

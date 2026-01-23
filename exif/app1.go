@@ -43,7 +43,7 @@ func findAPP1Segment(data []byte) (int, error) {
 	}
 	for i := 0; i < len(data)-1; i++ {
 		if data[i] == 0xFF && data[i+1] == 0xE1 {
-			slog.Info("Found APP1 segment")
+			slog.Debug("Found APP1 segment")
 			return i, nil
 		}
 	}
@@ -63,16 +63,16 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 		return nil, err
 	}
 
-	slog.Info("detected photo endianess from TIFF header", "endian", endian)
+	slog.Debug("detected photo endianess from TIFF header", "endian", endian)
 
 	tiffStart := offset + 10
 	ifdOffset := endian.Uint32(data[tiffStart+4 : tiffStart+8])
 	firstIfdIndex := tiffStart + int(ifdOffset)
 
-	slog.Info("First IFD Index", "first", firstIfdIndex)
+	slog.Debug("First IFD Index", "first", firstIfdIndex)
 
 	entryCount := endian.Uint16(data[firstIfdIndex : firstIfdIndex+2])
-	slog.Info("IFD entry count", "count", entryCount)
+	slog.Debug("IFD entry count", "count", entryCount)
 
 	metadata := helpers.PhotoExifEvidence{}
 	helper := helpers.ValueExtractor{
@@ -85,7 +85,7 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 		entryOffset := firstIfdIndex + 2 + (j * 12)
 		entry := helpers.ParseIFDEntry(data, entryOffset, endian)
 
-		slog.Info("IFD01 Entry",
+		slog.Debug("IFD01 Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),
 			"type", entry.DataType,
 			"count", entry.Count,
@@ -141,6 +141,16 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 		}
 	}
 
+	// TODO: Implement Samsung trailer parsing
+	//if strings.ToLower(metadata.Device.Make) == "samsung" {
+	//	parsed, err := makernotes.ParseSamsungTrailer(data)
+	//	if err != nil {
+	//		slog.Warn("Failed to parse Samsung Trailer Tags", "error", err)
+	//	} else {
+	//		metadata.Authenticity.MakerNote = *parsed
+	//	}
+	//}
+
 	// Photo doesn't need extra processing for MakerNote
 	if !strings.HasPrefix(metadata.Processing.Software, "HDR+") {
 		return &metadata, nil
@@ -152,7 +162,7 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 		return &metadata, err
 	}
 
-	slog.Info("Found XMP data", "xmp", output)
+	slog.Debug("Found XMP data", "xmp", output)
 	xmp := helper.DecodeXMPMeta([]byte(output))
 
 	if xmp.RDF.Description.HasExtendedXMP == "" {
@@ -183,7 +193,7 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 	}
 
 	if string(encrypted[0:4]) == "HDRP" {
-		slog.Info("Found Google's HDRPlus header")
+		slog.Debug("Found Google's HDRPlus header")
 
 		decrypted, err := makernotes.DecryptHDRPBytes(encrypted[5:])
 		if err != nil {
@@ -206,7 +216,7 @@ func ExtractExifData(data []byte) (*helpers.PhotoExifEvidence, error) {
 			// The data is likely truncated, but we can still extract other EXIF data
 			slog.Warn("Protobuf parsing incomplete - data may be truncated or corrupted", "error", err, "dataSize", len(protoBytes))
 		} else {
-			slog.Info("Successfully parsed HDR Plus MakerNotes", "hasData", hdrPlusNotes.ProtoReflect().IsValid())
+			slog.Debug("Successfully parsed HDR Plus MakerNotes", "hasData", hdrPlusNotes.ProtoReflect().IsValid())
 		}
 
 		// Populate the MakerNote data in the metadata struct

@@ -36,6 +36,9 @@ const (
 	Differential     helpers.Tag = 0x1e
 )
 
+type GPSIntermediateData struct {
+}
+
 func ExtractGPSIFD(exifIfdOffset int, metadata *helpers.PhotoExifEvidence, helper *helpers.ValueExtractor) {
 	entryCount := helper.Endian.Uint16(helper.Data[exifIfdOffset : exifIfdOffset+2])
 
@@ -48,7 +51,7 @@ func ExtractGPSIFD(exifIfdOffset int, metadata *helpers.PhotoExifEvidence, helpe
 		entryOffset := exifIfdOffset + 2 + (j * 12)
 		entry := helpers.ParseIFDEntry(helper.Data, entryOffset, helper.Endian)
 
-		slog.Info("GPS IFD Entry",
+		slog.Debug("GPS IFD Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),
 			"type", entry.DataType,
 			"count", entry.Count,

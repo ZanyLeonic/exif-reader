@@ -42,7 +42,7 @@ func (p *AppleParser) Parse(e *helpers.ValueExtractor, entry helpers.IFDEntry) (
 	mnTiffStart := 0 // Offsets are relative to byte 0 of MakerNote
 	mnFirstIfd := 14 // IFD starts at byte 14
 
-	slog.Info("Apple MakerNote IFD location",
+	slog.Debug("Apple MakerNote IFD location",
 		"ifdPosition", mnFirstIfd)
 
 	if mnFirstIfd+2 > len(raw) {
@@ -65,10 +65,10 @@ func (p *AppleParser) Parse(e *helpers.ValueExtractor, entry helpers.IFDEntry) (
 			"availableBytes", len(raw)-entriesStart)
 		// Adjust entry count to what we can actually read
 		entryCount = uint16((len(raw) - entriesStart) / 12)
-		slog.Info("Adjusted entry count to fit available data", "newCount", entryCount)
+		slog.Debug("Adjusted entry count to fit available data", "newCount", entryCount)
 	}
 
-	slog.Info("Apple MakerNote IFD parsed",
+	slog.Debug("Apple MakerNote IFD parsed",
 		"entryCount", entryCount,
 		"entriesStart", entriesStart)
 
@@ -87,7 +87,7 @@ func (p *AppleParser) Parse(e *helpers.ValueExtractor, entry helpers.IFDEntry) (
 
 		entry := helpers.ParseIFDEntry(raw, entryOffset, mnEndian)
 
-		slog.Info("Apple MakerNote entry",
+		slog.Debug("Apple MakerNote entry",
 			"index", j,
 			"tag", fmt.Sprintf("0x%04x", entry.Tag),
 			"type", entry.DataType,

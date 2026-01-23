@@ -231,7 +231,7 @@ func ReadGzipContent(decrypted []byte) ([]byte, error) {
 		if err != nil || len(protoBytes) == 0 {
 			return nil, fmt.Errorf("both gzip and raw inflate failed: %w", err)
 		}
-		slog.Info("Successfully inflated using raw deflate", "size", len(protoBytes))
+		slog.Debug("Successfully inflated using raw deflate", "size", len(protoBytes))
 
 		return protoBytes, nil
 	}
@@ -252,7 +252,7 @@ func ReadGzipContent(decrypted []byte) ([]byte, error) {
 		slog.Warn("gzip stream truncated (unexpected EOF), using available data", "bytesRead", len(protoBytes))
 	}
 
-	slog.Info("Decompressed protobuf data", "size", len(protoBytes))
+	slog.Debug("Decompressed protobuf data", "size", len(protoBytes))
 
 	return protoBytes, nil
 }

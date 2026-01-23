@@ -64,7 +64,7 @@ func ExtractExifSubIFD(exifIfdOffset int, metadata *helpers.PhotoExifEvidence, h
 		entryOffset := exifIfdOffset + 2 + (j * 12)
 		entry := helpers.ParseIFDEntry(helper.Data, entryOffset, helper.Endian)
 
-		slog.Info("ExifIFD Entry",
+		slog.Debug("ExifIFD Entry",
 			"tag", fmt.Sprintf("%#x", entry.Tag),
 			"type", entry.DataType,
 			"count", entry.Count,
